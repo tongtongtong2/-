@@ -1,0 +1,11 @@
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+PyMySQL==1.1.0
+cryptography==41.0.7
+APScheduler==3.10.4
+akshare==1.13.0
+pandas==2.1.4
+numpy==1.26.2
+requests==2.31.0
+python-dotenv==1.0.0
+pytest==7.4.3
