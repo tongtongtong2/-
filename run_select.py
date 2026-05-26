@@ -12,6 +12,7 @@ import sys
 import time
 import math
 from datetime import date, datetime, timedelta
+from config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 for _k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
