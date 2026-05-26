@@ -391,6 +391,91 @@ class DataFetcher:
         return df
 
     @retry(times=2, delay=1)
+    def _fetch_spot_tencent(self) -> pd.DataFrame:
+        """腾讯行情兜底 — 拉取全市场实时行情 (qt.gtimg.cn)。"""
+        import urllib.request
+        import re
+        
+        # 先拉股票列表
+        try:
+            stock_list = self.get_stock_list()
+        except Exception:
+            stock_list = pd.DataFrame()
+        
+        if stock_list.empty:
+            # Fallback: 用新浪的 stock_list 逻辑
+            from app.data_fetcher import _SINA_NODES
+            codes = []
+            for node, pages in _SINA_NODES.items():
+                for page in range(1, pages + 1):
+                    try:
+                        url = f"http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page={page}&num=80&sort=symbol&asc=1&node={node}"
+                        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(req, timeout=10) as resp:
+                            import json
+                            data = json.loads(resp.read().decode("gbk"))
+                            for item in data:
+                                codes.append(item.get("symbol", ""))
+                    except Exception:
+                        pass
+        else:
+            codes = stock_list["stock_code"].tolist() if "stock_code" in stock_list.columns else []
+        
+        if not codes:
+            raise RuntimeError("无法获取股票列表")
+        
+        # 用腾讯 API 批量拉行情
+        all_rows = []
+        batch_size = 50
+        for i in range(0, len(codes), batch_size):
+            batch = codes[i:i + batch_size]
+            # 腾讯格式: sh600519,sz000858
+            symbols = []
+            for c in batch:
+                c = str(c).zfill(6)
+                prefix = "sh" if c.startswith(("6", "9")) else "sz"
+                symbols.append(f"{prefix}{c}")
+            
+            try:
+                url = f"http://qt.gtimg.cn/q={','.join(symbols)}"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    raw = resp.read().decode("gbk")
+                
+                for line in raw.strip().split("\n"):
+                    if not line.startswith("v_"):
+                        continue
+                    # 解析: v_sh600519="1~贵州茅台~600519~..."
+                    parts = line.split("~")
+                    if len(parts) < 40:
+                        continue
+                    code = parts[2].strip()
+                    name = parts[1].strip()
+                    try:
+                        price = float(parts[3])
+                    except ValueError:
+                        continue
+                    all_rows.append({
+                        "代码": code,
+                        "名称": name,
+                        "最新价": price,
+                        "涨跌幅": float(parts[32]) if parts[32] else 0.0,
+                        "成交量": int(parts[6]) if parts[6] else 0,
+                        "成交额": float(parts[37]) if parts[37] else 0.0,
+                        "流通市值": float(parts[44]) if len(parts) > 44 and parts[44] else 0.0,
+                    })
+                time.sleep(0.1)
+            except Exception as e:
+                logger.warning("腾讯行情批次 %d 失败: %s", i, e)
+                continue
+        
+        if not all_rows:
+            raise RuntimeError("腾讯行情返回空数据")
+        
+        df = pd.DataFrame(all_rows)
+        df.rename(columns=_SPOT_FIELD_MAP, inplace=True)
+        return df
+
     def _request_spot_page(self, session: requests.Session, params: dict) -> list[dict]:
         """请求单页行情数据：依次尝试 https/http × 多个子域，命中即返回。"""
         last_exc: Optional[BaseException] = None

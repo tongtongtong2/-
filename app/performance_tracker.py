@@ -74,7 +74,11 @@ class PerformanceTracker:
             logger.info("没有已观察+已成交的 active 推荐需要更新")
             return {"updated": 0, "closed": 0}
 
-        spot = self.fetcher.get_realtime_prices([r.stock_code for r in actives])
+        try:
+            spot = self.fetcher.get_realtime_prices([r.stock_code for r in actives])
+        except Exception as e:
+            logger.warning("实时行情获取失败，跳过今日更新: %s", e)
+            return {"updated": 0, "closed": 0, "error": str(e)}
         spot_idx = (
             spot.set_index("stock_code") if not spot.empty and "stock_code" in spot.columns else None
         )
