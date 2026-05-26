@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% set nav = 'watch' %}
+{% block title %}自选观察池 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">⭐ 自选观察池</h3>
+    <div class="text-muted small">
+      只有加入观察池的推荐才会被每日跟踪行情和生成买卖信号。
+      未加入的推荐保留在「今日推荐 / 历史推荐」中，但不会消耗 akshare 接口。
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <button id="btn-trigger-update" class="btn btn-outline-primary">更新表现</button>
+  </div>
+</div>
+
+{% if items %}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">观察中</div>
+    <div class="stat-value">{{ items|selectattr('status', 'equalto', 'active')|list|length }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">已平仓</div>
+    <div class="stat-value">{{ items|selectattr('status', 'equalto', 'closed')|list|length }}</div>
+  </div></div></div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>状态</th>
+        <th>代码</th>
+        <th>名称</th>
+        <th>推荐日</th>
+        <th class="text-end">推荐价</th>
+        <th class="text-end">现价 / 平仓价</th>
+        <th class="text-end">涨跌幅 / 收益</th>
+        <th class="text-end">持仓(股)</th>
+        <th class="text-end">盈亏金额</th>
+        <th>信号</th>
+        <th>原因</th>
+        <th class="text-center">操作</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in items %}
+      <tr data-rec-id="{{ r.id }}">
+        <td>
+          {% if r.status == 'active' %}
+            <span class="badge bg-success">持仓</span>
+          {% else %}
+            <span class="badge bg-secondary">已平</span>
+          {% endif %}
+        </td>
+        <td class="font-monospace">{{ r.stock_code }}</td>
+        <td>{{ r.stock_name }}</td>
+        <td>{{ r.recommend_date }}</td>
+        <td class="text-end">{% if r.recommend_price is not none %}<span class="js-editable-price" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.recommend_price) }}" title="点击修改成本价">{{ '%.2f'|format(r.recommend_price) }}</span>{% else %}-{% endif %}</td>
+        <td class="text-end">
+          {% if r.status == 'closed' and r.close_price is not none %}
+            {{ '%.2f'|format(r.close_price) }}
+          {% elif r.current_price is not none %}
+            <span class="js-editable-curprice" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.current_price) }}" title="点击修改现价">{{ '%.2f'|format(r.current_price) }}</span>
+          {% else %}-{% endif %}
+        </td>
+        <td class="text-end js-change-cell">
+          {% if r.status == 'closed' and r.final_return is not none %}
+            <span class="{% if r.final_return >= 0 %}text-up{% else %}text-down{% endif %}">
+              {{ '%.2f'|format(r.final_return * 100) }}%
+            </span>
+          {% elif r.change_percent is not none %}
+            <span class="{% if r.change_percent >= 0 %}text-up{% else %}text-down{% endif %}">
+              {{ '%.2f'|format(r.change_percent * 100) }}%
+            </span>
+          {% else %}-{% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.shares and r.shares > 0 %}
+            <span class="js-editable-shares" data-rec-id="{{ r.id }}" data-shares="{{ r.shares }}" title="点击修改股数">{{ r.shares }}</span>
+          {% else %}
+            <span class="js-editable-shares text-muted" data-rec-id="{{ r.id }}" data-shares="0" title="点击填写股数">-</span>
+          {% endif %}
+        </td>
+        <td class="text-end fw-bold js-pnl-cell {% if (r.pnl_amount or 0) > 0 %}text-up{% elif (r.pnl_amount or 0) < 0 %}text-down{% endif %}">
+          {% if r.pnl_amount is defined and r.pnl_amount != 0 %}{{ '%+.2f'|format(r.pnl_amount) }}{% else %}-{% endif %}
+        </td>
+        <td>{% include "_signal_badge.html" with context %}</td>
+        <td class="small text-muted">{{ r.signal_reason or '-' }}</td>
+        <td class="text-center">
+          <button class="btn btn-sm btn-outline-danger js-watch-toggle"
+                  data-rec-id="{{ r.id }}"
+                  data-watched="1">移出</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">
+  自选池暂为空。前往
+  <a href="{{ url_for('main.index') }}">今日推荐</a>
+  或 <a href="{{ url_for('main.recommendations') }}">历史推荐</a>
+  ，点击 <b>☆ 加入</b> 把感兴趣的股票放进来。
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,150 @@
+:root {
+  --up: #d9534f;
+  --down: #2a9d8f;
+  --bg-soft: #f6f7fb;
+}
+
+body {
+  background: var(--bg-soft);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.text-up { color: var(--up) !important; font-weight: 600; }
+.text-down { color: var(--down) !important; font-weight: 600; }
+
+.stat-card {
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
+  height: 100%;
+}
+.stat-card .stat-label {
+  font-size: 0.75rem;
+  color: #6b7280;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.stat-card .stat-value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  margin-top: 0.25rem;
+}
+
+.font-monospace { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.table thead th {
+  font-size: 0.85rem;
+  letter-spacing: 0.02em;
+}
+
+.navbar-brand { letter-spacing: 0.02em; }
+
+/* ---- 可排序表头 ---- */
+#rec-table .sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background .15s;
+}
+#rec-table .sortable:hover {
+  background: #e9ecef;
+}
+#rec-table .sortable.sorted {
+  color: #0d6efd;
+  font-weight: 600;
+}
+#rec-table .sort-arrow {
+  font-size: 0.7rem;
+  color: #adb5bd;
+}
+#rec-table .sortable.sorted .sort-arrow {
+  color: #0d6efd;
+}
+
+/* ---- 筛选栏 ---- */
+.filter-bar {
+  border: 1px solid #dee2e6;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+/* ---- 行业标签 ---- */
+.industry-badge {
+  font-size: 0.75rem;
+  font-weight: 500;
+  background: #eef2ff;
+  color: #4338ca;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+/* ---- 综合分高亮 ---- */
+.score-cell {
+  letter-spacing: 0.03em;
+}
+
+/* ---- 可编辑成本价 ---- */
+.js-editable-price {
+  cursor: pointer;
+  border-bottom: 1px dashed #adb5bd;
+  padding: 1px 2px;
+  border-radius: 2px;
+  transition: background .15s;
+}
+.js-editable-price:hover {
+  background: #e7f0ff;
+  border-bottom-color: #0d6efd;
+}
+.js-editable-curprice {
+  cursor: pointer;
+  border-bottom: 1px dashed #adb5bd;
+  padding: 1px 2px;
+  border-radius: 2px;
+  transition: background .15s;
+}
+.js-editable-curprice:hover {
+  background: #e7f0ff;
+  border-bottom-color: #0d6efd;
+}
+.js-editable-shares {
+  cursor: pointer;
+  border-bottom: 1px dashed #adb5bd;
+  padding: 1px 2px;
+  border-radius: 2px;
+  transition: background .15s;
+}
+.js-editable-shares:hover {
+  background: #e7f0ff;
+  border-bottom-color: #0d6efd;
+}
+.editable-price-input {
+  width: 90px;
+  height: 28px;
+  font-size: 0.875rem;
+  text-align: right;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* ── 大盘状态栏 ── */
+#market-status-bar {
+  font-size: 0.9rem;
+  transition: background .3s;
+}
+
+/* ── 持仓卡片 ── */
+.holding-card {
+  border-left: 4px solid #0d6efd;
+  transition: box-shadow .2s, transform .15s;
+}
+.holding-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+/* ── 信号标记精简 ── */
+#rec-table .badge[title] {
+  cursor: help;
+}

@@ -136,3 +136,25 @@ logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# ===== Project-specific excludes =====
+
+# Data files (too large for git)
+backtest/data/
+
+# Database dumps
+database_export.sql
+
+# Secrets - contains API tokens
+tushare_client.py
+
+# Virtual environment
+.venv/
+venv/
+
+# Backup files
+*.bak
+
+# Backtest results (generated data)
+backtest/results/
+backtest/backtest/results/

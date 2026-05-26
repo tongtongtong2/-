@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% set nav = 'recs' %}
+{% block title %}历史推荐 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<h3 class="mb-3">历史推荐</h3>
+
+<form class="row g-2 mb-3 align-items-end" method="get" id="filter-form">
+  <div class="col-auto">
+    <label class="form-label small mb-1">起始日期</label>
+    <input type="date" name="start" value="{{ start }}" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">结束日期</label>
+    <input type="date" name="end" value="{{ end }}" class="form-control form-control-sm">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">状态</label>
+    <select name="status" class="form-select form-select-sm">
+      <option value="" {% if not status %}selected{% endif %}>全部</option>
+      <option value="active" {% if status == 'active' %}selected{% endif %}>活跃</option>
+      <option value="closed" {% if status == 'closed' %}selected{% endif %}>已平仓</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-sm btn-primary" type="submit">筛选</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.recommendations') }}">重置</a>
+  </div>
+</form>
+
+<div class="text-muted small mb-2">共 {{ items|length }} 条（最多展示 500 条）</div>
+
+<div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>推荐日</th>
+        <th>代码</th>
+        <th>名称</th>
+        <th>行业</th>
+        <th class="text-end">推荐价</th>
+        <th class="text-end">现价/平仓价</th>
+        <th class="text-end">收益</th>
+        <th class="text-end">持仓(股)</th>
+        <th class="text-end">盈亏金额</th>
+        <th>状态</th>
+        <th>信号</th>
+        <th class="text-end">综合分</th>
+        <th class="text-center">观察</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in items %}
+      <tr data-rec-id="{{ r.id }}" {% if r.is_watched %}class="table-warning"{% endif %}>
+        <td>{{ r.recommend_date }}</td>
+        <td class="font-monospace">{{ r.stock_code }}</td>
+        <td>{{ r.stock_name }}</td>
+        <td>
+          <span class="badge industry-badge">{{ r.recommend_reason.industry if r.recommend_reason and r.recommend_reason.industry else '其他' }}</span>
+        </td>
+        <td class="text-end">{% if r.recommend_price is not none %}<span class="js-editable-price" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.recommend_price) }}" title="点击修改成本价">{{ '%.2f'|format(r.recommend_price) }}</span>{% else %}-{% endif %}</td>
+        <td class="text-end">
+          {% if r.status == 'closed' and r.close_price is not none %}{{ '%.2f'|format(r.close_price) }}
+          {% elif r.current_price is not none %}{{ '%.2f'|format(r.current_price) }}
+          {% else %}-{% endif %}
+        </td>
+        {% set ret = r.final_return if r.status == 'closed' else r.change_percent %}
+        <td class="text-end {% if (ret or 0) > 0 %}text-up{% elif (ret or 0) < 0 %}text-down{% endif %}">
+          {% if ret is not none %}{{ '%.2f'|format(ret * 100) }}%{% else %}-{% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.shares and r.shares > 0 %}
+            <span class="js-editable-shares" data-rec-id="{{ r.id }}" data-shares="{{ r.shares }}" title="点击修改股数">{{ r.shares }}</span>
+          {% else %}
+            <span class="js-editable-shares text-muted" data-rec-id="{{ r.id }}" data-shares="0" title="点击填写股数">-</span>
+          {% endif %}
+        </td>
+        <td class="text-end fw-bold js-pnl-cell {% if (r.pnl_amount or 0) > 0 %}text-up{% elif (r.pnl_amount or 0) < 0 %}text-down{% endif %}">
+          {% if r.pnl_amount is defined and r.pnl_amount != 0 %}{{ '%+.2f'|format(r.pnl_amount) }}{% else %}-{% endif %}
+        </td>
+        <td>
+          {% if r.status == 'closed' %}
+            <span class="badge bg-dark">已平仓</span>
+          {% else %}
+            <span class="badge bg-success">活跃</span>
+          {% endif %}
+        </td>
+        <td>{% include "_signal_badge.html" with context %}</td>
+        <td class="text-end">
+          {% if r.recommend_reason and r.recommend_reason.total_score is defined %}
+            {{ '%.1f'|format(r.recommend_reason.total_score) }}
+          {% else %}-{% endif %}
+        </td>
+        <td class="text-center">
+          <button class="btn btn-sm js-watch-toggle {% if r.is_watched %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                  data-rec-id="{{ r.id }}"
+                  data-watched="{{ '1' if r.is_watched else '0' }}">
+            {% if r.is_watched %}★{% else %}☆{% endif %}
+          </button>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="13" class="text-center text-muted py-4">暂无数据</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

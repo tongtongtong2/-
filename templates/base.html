@@ -1,0 +1,54 @@
+{% set nav = nav or '' %}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}每日股票推荐平台{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+  <div class="container-fluid">
+    <a class="navbar-brand fw-bold" href="{{ url_for('main.index') }}">📈 股票推荐平台</a>
+    <div class="collapse navbar-collapse">
+      <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'index' %}active{% endif %}" href="{{ url_for('main.index') }}">今日推荐</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'recs' %}active{% endif %}" href="{{ url_for('main.recommendations') }}">历史推荐</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'watch' %}active{% endif %}" href="{{ url_for('main.watchlist') }}">⭐ 自选池</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'analyze' %}active{% endif %}" href="{{ url_for('main.analyze') }}">🔍 个股分析</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'perf' %}active{% endif %}" href="{{ url_for('main.performance') }}">表现跟踪</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if nav == 'stats' %}active{% endif %}" href="{{ url_for('main.statistics') }}">策略统计</a>
+        </li>
+      </ul>
+      <span class="navbar-text small text-warning">仅供研究学习，不构成投资建议</span>
+    </div>
+  </div>
+</nav>
+
+<main class="container-fluid py-4">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="text-center text-muted small py-4">
+  © 2026 stock-recommendation-platform · Flask + AkShare
+</footer>
+
+<script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

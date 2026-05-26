@@ -1,0 +1,348 @@
+{% extends "base.html" %}
+{% set nav = 'analyze' %}
+{% block title %}个股分析 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">🔍 个股分析</h3>
+    <div class="text-muted small">
+      输入 6 位股票代码，按现在的"中长期稳健趋势"策略给一个体检 + 综合分 + 结论。<br>
+      仅作辅助判断，<b>不构成投资建议</b>。
+    </div>
+  </div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form id="analyze-form" class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small text-muted mb-1">股票代码</label>
+        <input id="stock-code-input" type="text" class="form-control"
+               style="width: 160px; letter-spacing: 2px; font-family: monospace;"
+               maxlength="6" pattern="\d{6}" placeholder="600519" autofocus required>
+      </div>
+      <div class="col-auto">
+        <button type="submit" id="btn-analyze" class="btn btn-primary">分析</button>
+      </div>
+      <div class="col-auto small text-muted">
+        提示：A 股代码 6 位数字，例 <code>600519</code>（茅台）<code>000858</code>（五粮液）<code>300750</code>（宁德时代）
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="analyze-loading" class="text-center text-muted py-4 d-none">
+  <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+  正在拉取行情和日线数据，约 5-10 秒…
+</div>
+
+<div id="analyze-error" class="alert alert-danger d-none"></div>
+
+<div id="analyze-result" class="d-none">
+  <!-- 结论卡 -->
+  <div class="card mb-3" id="verdict-card">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
+        <div>
+          <div class="text-muted small">分析对象</div>
+          <h4 class="mb-1">
+            <span id="r-stock-code" class="font-monospace text-secondary"></span>
+            <span id="r-stock-name" class="ms-2"></span>
+          </h4>
+          <div class="small">
+            现价 <span id="r-current-price" class="fw-bold"></span>
+            <span id="r-change-percent" class="ms-2"></span>
+            · 流通市值 <span id="r-mcap" class="text-secondary"></span>
+            <span id="r-degraded-badge" class="badge bg-warning text-dark ms-2 d-none">
+              ⚠ 实时行情暂不可用，仅基于日线分析
+            </span>
+          </div>
+        </div>
+        <div class="text-end">
+          <div class="text-muted small">综合分</div>
+          <div id="r-total-score" class="display-6 fw-bold"></div>
+        </div>
+        <div class="text-end">
+          <div class="text-muted small">结论</div>
+          <div id="r-verdict" class="fs-4 fw-bold"></div>
+          <div id="r-verdict-reason" class="small text-muted"></div>
+        </div>
+      </div>
+      <div class="mt-3">
+        <button id="btn-add-watch" class="btn btn-warning d-none">
+          ★ 加入观察池
+        </button>
+        <span id="watch-status" class="ms-2 text-muted small"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <!-- 体检表 -->
+    <div class="col-lg-6">
+      <div class="card h-100">
+        <div class="card-header bg-light">
+          <b>硬过滤体检</b>
+          <span id="r-passed-count" class="text-muted small ms-2"></span>
+        </div>
+        <ul id="r-checks" class="list-group list-group-flush"></ul>
+      </div>
+    </div>
+
+    <!-- 因子打分 + 关键指标 -->
+    <div class="col-lg-6">
+      <div class="card mb-3">
+        <div class="card-header bg-light"><b>五因子打分（满分 100）</b></div>
+        <div class="card-body">
+          <div id="r-score-bars"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header bg-light"><b>关键技术指标</b></div>
+        <div class="card-body small">
+          <div class="row g-2" id="r-indicators"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 风险提示 -->
+  <div id="r-warnings-card" class="card mt-3 border-warning d-none">
+    <div class="card-header bg-warning-subtle"><b>⚠ 风险提示</b></div>
+    <ul id="r-warnings" class="list-group list-group-flush"></ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const form = document.getElementById('analyze-form');
+  const codeInput = document.getElementById('stock-code-input');
+  const btn = document.getElementById('btn-analyze');
+  const loading = document.getElementById('analyze-loading');
+  const errBox = document.getElementById('analyze-error');
+  const resultBox = document.getElementById('analyze-result');
+
+  function fmtMcap(v) {
+    if (!v) return '-';
+    if (v >= 1e8) return (v / 1e8).toFixed(1) + ' 亿';
+    return (v / 1e4).toFixed(0) + ' 万';
+  }
+  function fmtPct(v, signed) {
+    if (v === null || v === undefined) return '-';
+    const s = (signed && v > 0 ? '+' : '') + v.toFixed(2) + '%';
+    return s;
+  }
+  function colorOfPct(v) {
+    if (v > 0) return 'text-up';
+    if (v < 0) return 'text-down';
+    return '';
+  }
+  function verdictClass(v) {
+    return {
+      '强烈推荐': 'text-success',
+      '可买入':   'text-primary',
+      '观望':     'text-warning',
+      '不建议':   'text-secondary',
+      '风险警示': 'text-danger',
+    }[v] || '';
+  }
+
+  let lastResult = null;
+
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const code = codeInput.value.trim();
+    if (!/^\d{6}$/.test(code)) {
+      errBox.textContent = '股票代码必须是 6 位数字';
+      errBox.classList.remove('d-none');
+      return;
+    }
+    errBox.classList.add('d-none');
+    resultBox.classList.add('d-none');
+    loading.classList.remove('d-none');
+    btn.disabled = true;
+    try {
+      const r = await fetch('/api/analyze/' + code);
+      const data = await r.json();
+      if (!r.ok || data.success === false) {
+        throw new Error(data.error || '分析失败');
+      }
+      lastResult = data;
+      renderResult(data);
+    } catch (e) {
+      errBox.textContent = '分析失败：' + e.message;
+      errBox.classList.remove('d-none');
+    } finally {
+      loading.classList.add('d-none');
+      btn.disabled = false;
+    }
+  });
+
+  function renderResult(d) {
+    document.getElementById('r-stock-code').textContent = d.stock_code;
+    document.getElementById('r-stock-name').textContent = d.stock_name || '';
+    document.getElementById('r-current-price').textContent = d.current_price.toFixed(2);
+
+    const cp = d.change_percent * 100;
+    const cpEl = document.getElementById('r-change-percent');
+    cpEl.textContent = fmtPct(cp, true);
+    cpEl.className = 'ms-2 ' + colorOfPct(cp);
+
+    document.getElementById('r-mcap').textContent = fmtMcap(d.float_market_cap);
+
+    // 降级模式提示
+    const degradedBadge = document.getElementById('r-degraded-badge');
+    if (d.spot_degraded) {
+      degradedBadge.classList.remove('d-none');
+    } else {
+      degradedBadge.classList.add('d-none');
+    }
+
+    const total = d.score.total;
+    document.getElementById('r-total-score').textContent = total.toFixed(1);
+
+    const vEl = document.getElementById('r-verdict');
+    vEl.textContent = d.verdict;
+    vEl.className = 'fs-4 fw-bold ' + verdictClass(d.verdict);
+    document.getElementById('r-verdict-reason').textContent = d.verdict_reason;
+
+    // 体检表
+    const checksUl = document.getElementById('r-checks');
+    checksUl.innerHTML = '';
+    d.checks.forEach((c) => {
+      const li = document.createElement('li');
+      li.className = 'list-group-item d-flex justify-content-between align-items-start gap-2';
+      li.innerHTML = `
+        <div>
+          <span class="${c.passed ? 'text-success' : 'text-danger'} fw-bold">
+            ${c.passed ? '✓' : '✗'}
+          </span>
+          <span class="ms-1">${c.name}</span>
+          <div class="small text-muted">${c.detail}</div>
+        </div>
+      `;
+      checksUl.appendChild(li);
+    });
+    document.getElementById('r-passed-count').textContent =
+      `${d.passed_count} / ${d.total_count} 通过`;
+
+    // 因子打分柱
+    const factors = [
+      ['趋势强度', d.score.trend_strength, 30],
+      ['趋势平滑', d.score.trend_smooth, 25],
+      ['量能配合', d.score.volume_factor, 20],
+      ['位置因子', d.score.position, 15],
+      ['流动性',   d.score.liquidity, 10],
+    ];
+    const bars = document.getElementById('r-score-bars');
+    bars.innerHTML = factors.map(([name, v, max]) => {
+      const pct = (v / max) * 100;
+      return `
+        <div class="mb-2">
+          <div class="d-flex justify-content-between small">
+            <span>${name}</span>
+            <span class="text-muted">${v.toFixed(1)} / ${max}</span>
+          </div>
+          <div class="progress" style="height: 8px;">
+            <div class="progress-bar bg-primary" style="width: ${pct}%"></div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // 关键指标
+    const ind = d.indicators;
+    const grid = document.getElementById('r-indicators');
+    const items = [
+      ['MA5', ind.ma5.toFixed(2)],
+      ['MA10', ind.ma10.toFixed(2)],
+      ['MA20', ind.ma20.toFixed(2)],
+      ['MA60', ind.ma60.toFixed(2)],
+      ['5日涨幅', `<span class="${colorOfPct(ind.ret_5)}">${fmtPct(ind.ret_5, true)}</span>`],
+      ['20日涨幅', `<span class="${colorOfPct(ind.ret_20)}">${fmtPct(ind.ret_20, true)}</span>`],
+      ['60日涨幅', `<span class="${colorOfPct(ind.ret_60)}">${fmtPct(ind.ret_60, true)}</span>`],
+      ['20日波动', ind.vol_std.toFixed(2) + '%'],
+      ['20日最大回撤', `<span class="text-down">${ind.max_dd_20.toFixed(2)}%</span>`],
+      ['量比 5/20', ind.vol_ratio_5_20.toFixed(2)],
+      ['距60日高', ind.dist_high60.toFixed(2) + '%'],
+      ['日均成交额', (ind.avg_turnover_20 / 1e8).toFixed(2) + ' 亿'],
+    ];
+    grid.innerHTML = items.map(([k, v]) => `
+      <div class="col-6 col-md-4">
+        <span class="text-muted">${k}：</span><b>${v}</b>
+      </div>
+    `).join('');
+
+    // 风险提示
+    const warnUl = document.getElementById('r-warnings');
+    const warnCard = document.getElementById('r-warnings-card');
+    if (d.warnings && d.warnings.length) {
+      warnUl.innerHTML = d.warnings.map((w) =>
+        `<li class="list-group-item">${w}</li>`
+      ).join('');
+      warnCard.classList.remove('d-none');
+    } else {
+      warnCard.classList.add('d-none');
+    }
+
+    // 加观察池按钮态
+    const addBtn = document.getElementById('btn-add-watch');
+    const status = document.getElementById('watch-status');
+    if (d.existing_rec && d.existing_rec.is_watched) {
+      addBtn.classList.add('d-none');
+      status.innerHTML = `<span class="badge bg-warning text-dark">已在观察池中</span>
+        <span class="text-muted ms-1">来源：${d.existing_rec.source === 'user' ? '手动' : '系统'}，加入日 ${d.existing_rec.recommend_date}</span>`;
+    } else if (d.verdict === '风险警示' || d.verdict === '不建议') {
+      // 风险警示也允许用户加，但默认不鼓励
+      addBtn.classList.remove('d-none');
+      addBtn.classList.remove('btn-warning');
+      addBtn.classList.add('btn-outline-secondary');
+      addBtn.textContent = '☆ 仍要加入观察池';
+      status.textContent = '';
+    } else {
+      addBtn.classList.remove('d-none');
+      addBtn.classList.remove('btn-outline-secondary');
+      addBtn.classList.add('btn-warning');
+      addBtn.textContent = '★ 加入观察池';
+      status.textContent = '';
+    }
+
+    resultBox.classList.remove('d-none');
+  }
+
+  document.getElementById('btn-add-watch').addEventListener('click', async () => {
+    if (!lastResult) return;
+    const btn = document.getElementById('btn-add-watch');
+    const status = document.getElementById('watch-status');
+    btn.disabled = true;
+    btn.textContent = '提交中…';
+    try {
+      const r = await fetch('/api/watch/by_code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          stock_code: lastResult.stock_code,
+          stock_name: lastResult.stock_name,
+          current_price: lastResult.current_price,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok || data.success === false) {
+        throw new Error(data.error || '加入失败');
+      }
+      btn.classList.add('d-none');
+      status.innerHTML = `<span class="badge bg-success">✓ 已加入观察池</span>
+        <span class="text-muted ms-1">来源：${data.source === 'user' ? '手动' : '系统'}${data.reused ? '（复用现有推荐）' : ''}</span>
+        <a class="ms-2" href="/watchlist">前往自选池</a>`;
+    } catch (e) {
+      alert('加入失败：' + e.message);
+      btn.disabled = false;
+      btn.textContent = '★ 加入观察池';
+    }
+  });
+})();
+</script>
+{% endblock %}

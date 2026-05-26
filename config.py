@@ -36,28 +36,40 @@ class Config:
     except ValueError:
         raise ValueError("TOP_N_STOCKS must be a valid integer")
     try:
-        MIN_VOLUME = int(os.getenv('MIN_VOLUME', 100000000))
+        MIN_VOLUME = float(os.getenv('MIN_VOLUME', 100000000))
     except ValueError:
-        raise ValueError("MIN_VOLUME must be a valid integer")
+        raise ValueError("MIN_VOLUME must be a valid number")
 
     # Trading Parameters
     try:
-        TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', 0.10))
+        TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', 0.15))
     except ValueError:
         raise ValueError("TAKE_PROFIT must be a valid float")
     try:
-        STOP_LOSS = float(os.getenv('STOP_LOSS', -0.05))
+        STOP_LOSS = float(os.getenv('STOP_LOSS', -0.07))
     except ValueError:
         raise ValueError("STOP_LOSS must be a valid float")
     try:
-        MAX_HOLD_DAYS = int(os.getenv('MAX_HOLD_DAYS', 20))
+        MAX_HOLD_DAYS = int(os.getenv('MAX_HOLD_DAYS', 30))
     except ValueError:
         raise ValueError("MAX_HOLD_DAYS must be a valid integer")
 
+    # 市场环境过滤：仅当沪深300 > MA60 时选股
+    MARKET_FILTER = os.getenv('MARKET_FILTER', 'True').lower() in ('true', '1', 'yes')
+    INDEX_MA_PERIOD = int(os.getenv('INDEX_MA_PERIOD', '60'))
+    try:
+        MAX_PER_SECTOR = int(os.getenv('MAX_PER_SECTOR', '2'))
+    except ValueError:
+        MAX_PER_SECTOR = 2
+
     # Scheduler Times (24-hour format)
     SELECTION_TIME = os.getenv('SELECTION_TIME', '15:30')
+    OPEN_FILL_TIME = os.getenv('OPEN_FILL_TIME', '09:35')  # 次日开盘价回填
     UPDATE_TIME = os.getenv('UPDATE_TIME', '15:35')
     STATISTICS_TIME = os.getenv('STATISTICS_TIME', '15:40')
+
+    # 行情数据源：auto = 先试东方财富再回落新浪；sina = 直接走新浪，跳过东方财富探测
+    SPOT_SOURCE = os.getenv('SPOT_SOURCE', 'auto').lower()
 
     # Logging Configuration
     LOG_DIR = os.getenv('LOG_DIR', 'logs')

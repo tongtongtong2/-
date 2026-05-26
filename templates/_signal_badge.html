@@ -1,0 +1,8 @@
+{% set sig = r.signal or 'buy' %}
+{% if sig == 'buy' %}
+  <span class="badge bg-primary" title="{{ r.signal_reason or '' }}">买入</span>
+{% elif sig == 'sell' %}
+  <span class="badge bg-danger" title="{{ r.signal_reason or '' }}">卖出</span>
+{% else %}
+  <span class="badge bg-secondary" title="{{ r.signal_reason or '' }}">持有</span>
+{% endif %}
