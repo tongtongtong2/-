@@ -39,16 +39,16 @@ def run_daily_selection(app, force: bool = False) -> int:
             logger.info("非交易日，跳过选股")
             return 0
 
-        # 去重逻辑：只看今天 source='system' 的推荐。
-        # 用户手动加（source='user'）的票不算"今日选股"，避免阻塞每日选股。
-        existing = (
+        # 去重逻辑：先删掉今天 source='system' 的旧推荐，再重新选
+        # （保证始终是最新的 TOP_N 结果，且不会被 run_select.py 的旧数据污染）
+        deleted = (
             StockRecommendation.query
             .filter_by(recommend_date=today, source="system")
-            .count()
+            .delete(synchronize_session=False)
         )
-        if existing:
-            logger.info("今日已有 %d 条系统推荐，跳过选股（直接复用，不重跑）", existing)
-            return existing
+        if deleted:
+            db.session.commit()
+            logger.info("已清除今日 %d 条旧系统推荐，重新选股", deleted)
 
         # 市场环境检查
         selector = StockSelector(min_volume=Config.MIN_VOLUME)
