@@ -139,11 +139,9 @@ Thumbs.db
 
 # ===== Project-specific excludes =====
 
-# Data files (too large for git)
-backtest/data/
+# Data files - managed by Git LFS
 
-# Database dumps
-database_export.sql
+# Database exports are tracked (no secrets)
 
 # Secrets - contains API tokens
 tushare_client.py
