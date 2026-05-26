@@ -823,3 +823,61 @@ def api_market_status():
 
     return jsonify(result)
 
+
+
+# ═══════════════════════════════════════════
+# 投资顾问模块
+# ═══════════════════════════════════════════
+
+@bp.route("/advisor")
+def advisor():
+    """投资顾问页面"""
+    return render_template("advisor.html", nav="advisor")
+
+
+@bp.route("/api/advisor/long-term/<stock_code>")
+def api_advisor_long_term(stock_code: str):
+    """长期投资总结 API"""
+    try:
+        from app.advisor import generate_long_term_summary
+        result = generate_long_term_summary(stock_code)
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:
+        logger.exception("长期分析失败")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/advisor/short-term/<stock_code>")
+def api_advisor_short_term(stock_code: str):
+    """短线总结 API"""
+    try:
+        from app.advisor import generate_short_term_summary
+        result = generate_short_term_summary(stock_code)
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:
+        logger.exception("短线分析失败")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/advisor/buy-sell/<stock_code>")
+def api_advisor_buy_sell(stock_code: str):
+    """买卖点分析 API"""
+    try:
+        from app.advisor import find_buy_sell_points
+        result = find_buy_sell_points(stock_code)
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:
+        logger.exception("买卖点分析失败")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/advisor/pattern/<stock_code>")
+def api_advisor_pattern(stock_code: str):
+    """历史图形匹配 API"""
+    try:
+        from app.advisor import find_similar_patterns
+        result = find_similar_patterns(stock_code)
+        return jsonify({"success": True, "data": result})
+    except Exception as exc:
+        logger.exception("图形匹配失败")
+        return jsonify({"success": False, "error": str(exc)}), 500

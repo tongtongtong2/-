@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+{% set nav = 'advisor' %}
+{% block title %}投资顾问 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">📋 智能投资顾问</h3>
+    <div class="text-muted small">
+      输入股票代码，获取 长期总结 / 短线分析 / 买卖点 / 历史图形匹配<br>
+      <b>仅供研究学习，不构成投资建议</b>
+    </div>
+  </div>
+</div>
+
+<!-- 输入区 -->
+<div class="card mb-4">
+  <div class="card-body">
+    <form id="advisor-form" class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small text-muted mb-1">股票代码</label>
+        <input id="stock-code" type="text" class="form-control"
+               style="width: 140px; letter-spacing: 2px; font-family: monospace;"
+               maxlength="6" pattern="\d{6}" placeholder="600519" autofocus required>
+      </div>
+      <div class="col-auto">
+        <button type="submit" id="btn-analyze" class="btn btn-primary">开始分析</button>
+      </div>
+      <div class="col-auto small text-muted">
+        提示：例 <code>600519</code> <code>000858</code> <code>601985</code>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 加载中 -->
+<div id="loading" class="text-center text-muted py-4 d-none">
+  <div class="spinner-border spinner-border-sm me-2"></div>
+  正在分析，首次调用约 10-20 秒...
+</div>
+
+<div id="error-box" class="alert alert-danger d-none"></div>
+
+<!-- 结果区 -->
+<div id="results" class="d-none">
+
+  <!-- 股票信息头 -->
+  <div class="card mb-3 border-primary">
+    <div class="card-body d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div>
+        <h4 class="mb-1">
+          <span id="r-code" class="font-monospace text-secondary"></span>
+          <span id="r-name" class="ms-2"></span>
+        </h4>
+        <span class="text-muted small">分析时间: <span id="r-time"></span></span>
+      </div>
+      <div class="text-end">
+        <div class="text-muted small">现价</div>
+        <span id="r-price" class="fs-4 fw-bold"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 导航 -->
+  <ul class="nav nav-tabs mb-3" id="advisor-tabs" role="tablist">
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active" id="tab-long" data-bs-toggle="tab" data-bs-target="#panel-long" type="button">📊 长期总结</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-short" data-bs-toggle="tab" data-bs-target="#panel-short" type="button">⚡ 短线分析</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-bs" data-bs-toggle="tab" data-bs-target="#panel-bs" type="button">🎯 买卖点</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-pattern" data-bs-toggle="tab" data-bs-target="#panel-pattern" type="button">🔮 图形匹配</button>
+    </li>
+  </ul>
+
+  <div class="tab-content" id="advisor-panels">
+    <!-- 长期总结 -->
+    <div class="tab-pane fade show active" id="panel-long">
+      <div id="long-content"></div>
+    </div>
+    <!-- 短线分析 -->
+    <div class="tab-pane fade" id="panel-short">
+      <div id="short-content"></div>
+    </div>
+    <!-- 买卖点 -->
+    <div class="tab-pane fade" id="panel-bs">
+      <div id="bs-content"></div>
+    </div>
+    <!-- 图形匹配 -->
+    <div class="tab-pane fade" id="panel-pattern">
+      <div id="pattern-content"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const $ = id => document.getElementById(id);
+
+// 格式化数字
+function fmt(val) {
+  if (val == null) return '-';
+  return typeof val === 'number' ? val.toFixed(2) : val;
+}
+
+// Tab loading indicator
+function setTabLoading(tabId) {
+  $(tabId).innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>加载中...</div>';
+}
+
+// 渲染长期总结
+function renderLongTerm(data) {
+  if (data.error) return `<div class="alert alert-warning">${data.error}</div>`;
+
+  let rows = '';
+  for (const [period, stats] of Object.entries(data.periods || {})) {
+    rows += `<tr>
+      <td class="fw-bold">${period}</td>
+      <td class="${stats['区间收益'].startsWith('-') ? 'text-danger' : 'text-success'}">${stats['区间收益']}</td>
+      <td class="text-danger">${stats['最大回撤']}</td>
+      <td>${stats['年化波动率']}</td>
+      <td>${stats['日胜率']}</td>
+      <td>${stats['沪深300收益']}</td>
+      <td class="${(stats['超额收益']||'').startsWith('-') ? 'text-danger' : 'text-success'}">${stats['超额收益'] || '-'}</td>
+    </tr>`;
+  }
+
+  let trends = (data.trend || []).map(t => `<li>${t}</li>`).join('');
+
+  return `
+    <div class="card mb-3">
+      <div class="card-header fw-bold">📈 多周期收益分析</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-striped table-hover mb-0 small">
+            <thead class="table-dark">
+              <tr><th>周期</th><th>区间收益</th><th>最大回撤</th><th>年化波动率</th><th>日胜率</th><th>沪深300</th><th>超额收益</th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header fw-bold">📐 趋势判断</div>
+      <div class="card-body">
+        <ul class="mb-0">${trends || '<li class="text-muted">无数据</li>'}</ul>
+        <div class="text-muted small mt-2">基于 ${data.data_days || 0} 天日线数据</div>
+      </div>
+    </div>`;
+}
+
+// 渲染短线分析
+function renderShortTerm(data) {
+  if (data.error) return `<div class="alert alert-warning">${data.error}</div>`;
+
+  let retHtml = '';
+  for (const [k, v] of Object.entries(data.returns || {})) {
+    const cls = v.startsWith('-') ? 'text-danger' : 'text-success';
+    retHtml += `<span class="badge bg-light ${cls} fs-6 me-2">${k}: ${v}</span>`;
+  }
+
+  let supHtml = (data.support || []).map(s => `<span class="badge bg-success me-1">${s.name}: ${s.price}</span>`).join('');
+  let resHtml = (data.resistance || []).map(r => `<span class="badge bg-danger me-1">${r.name}: ${r.price}</span>`).join('');
+
+  let sigs = (data.signals || []).map(s => `<li>${s}</li>`).join('');
+
+  return `
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header fw-bold">💰 近期收益</div>
+          <div class="card-body">${retHtml || '<span class="text-muted">数据不足</span>'}</div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card h-100">
+          <div class="card-header fw-bold">📊 盘面状态</div>
+          <div class="card-body">
+            <div class="mb-2">量比: <b>${data.volume_ratio?.toFixed(2) || '-'}</b></div>
+            <div class="mb-2">连续状态: <b>${data.consecutive || '-'}</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header fw-bold">🟢 支撑位</div>
+          <div class="card-body">${supHtml || '<span class="text-muted">-</span>'}</div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card">
+          <div class="card-header fw-bold">🔴 压力位</div>
+          <div class="card-body">${resHtml || '<span class="text-muted">-</span>'}</div>
+        </div>
+      </div>
+      <div class="col-12">
+        <div class="card">
+          <div class="card-header fw-bold">⚡ 短线信号</div>
+          <div class="card-body">
+            <ul class="mb-0">${sigs || '<li class="text-muted">无明显信号</li>'}</ul>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 渲染买卖点
+function renderBuySell(data) {
+  if (data.error) return `<div class="alert alert-warning">${data.error}</div>`;
+
+  let signalsHtml = '';
+  for (const s of data.signals || []) {
+    const badge = s.type === 'buy' ? 'bg-success' : 'bg-danger';
+    const icon = s.type === 'buy' ? '✅' : '❌';
+    signalsHtml += `<tr>
+      <td><span class="badge ${badge}">${icon} ${s.type === 'buy' ? '买入' : '卖出'}</span></td>
+      <td>${s.name}</td>
+      <td>${s.date}</td>
+      <td>${s.price}</td>
+      <td class="small text-muted">${s.desc}</td>
+    </tr>`;
+  }
+
+  let indHtml = '';
+  for (const [k, v] of Object.entries(data.indicators || {})) {
+    indHtml += `<span class="badge bg-secondary me-1">${k}: ${v}</span>`;
+  }
+
+  const overallCls = data.overall === '偏向买入' ? 'text-success' : (data.overall === '偏向卖出' ? 'text-danger' : 'text-warning');
+
+  return `
+    <div class="card mb-3 border-${data.overall === '偏向买入' ? 'success' : (data.overall === '偏向卖出' ? 'danger' : 'warning')}">
+      <div class="card-body text-center">
+        <div class="text-muted small mb-1">综合建议</div>
+        <div class="fs-3 fw-bold ${overallCls}">${data.overall}</div>
+        <div class="text-muted small">${data.overall_detail}</div>
+      </div>
+    </div>
+    <div class="card mb-3">
+      <div class="card-header fw-bold">🔧 技术指标</div>
+      <div class="card-body">${indHtml}</div>
+    </div>
+    <div class="card">
+      <div class="card-header fw-bold">📌 近期买卖信号</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-striped table-hover mb-0 small">
+            <thead class="table-dark">
+              <tr><th>类型</th><th>信号名称</th><th>日期</th><th>价格</th><th>说明</th></tr>
+            </thead>
+            <tbody>${signalsHtml || '<tr><td colspan="5" class="text-muted">暂无信号</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 渲染图形匹配
+function renderPattern(data) {
+  if (data.error) return `<div class="alert alert-warning">${data.error}</div>`;
+
+  let matchesHtml = '';
+  for (const m of data.self_matches || []) {
+    let futureHtml = '';
+    for (const [k, v] of Object.entries(m.future || {})) {
+      const cls = v.startsWith('-') ? 'text-danger' : 'text-success';
+      futureHtml += `<span class="badge bg-light ${cls} me-1">${k}: ${v}</span>`;
+    }
+    matchesHtml += `<tr>
+      <td>${m.start}</td>
+      <td>${m.end}</td>
+      <td><b>${(m.correlation * 100).toFixed(1)}%</b></td>
+      <td>${futureHtml || '-'}</td>
+    </tr>`;
+  }
+
+  let avgHtml = '';
+  for (const [k, v] of Object.entries(data.avg_future || {})) {
+    avgHtml += `<span class="badge bg-info me-1">${k}: ${v}</span>`;
+  }
+
+  return `
+    <div class="card mb-3">
+      <div class="card-header fw-bold">📈 历史相似走势统计</div>
+      <div class="card-body">
+        <div class="mb-2">基于近 <b>${data.lookback_days}</b> 天走势，历史相似图形后续平均收益:</div>
+        <div class="fs-5 mb-2">${avgHtml || '<span class="text-muted">-</span>'}</div>
+        <div class="text-muted small">⚠ ${data.note}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header fw-bold">🔍 历史相似片段 (Top ${(data.self_matches || []).length})</div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-striped table-hover mb-0 small">
+            <thead class="table-dark">
+              <tr><th>起始</th><th>结束</th><th>相似度</th><th>后续表现</th></tr>
+            </thead>
+            <tbody>${matchesHtml || '<tr><td colspan="4" class="text-muted">未找到相似图形</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// 分析流程
+async function runAnalysis(code) {
+  $('loading').classList.remove('d-none');
+  $('results').classList.add('d-none');
+  $('error-box').classList.add('d-none');
+
+  try {
+    const endpoints = {
+      long: `/api/advisor/long-term/${code}`,
+      short: `/api/advisor/short-term/${code}`,
+      bs: `/api/advisor/buy-sell/${code}`,
+      pattern: `/api/advisor/pattern/${code}`,
+    };
+
+    // 并行请求所有分析
+    const [longR, shortR, bsR, patternR] = await Promise.all([
+      fetch(endpoints.long).then(r => r.json()),
+      fetch(endpoints.short).then(r => r.json()),
+      fetch(endpoints.bs).then(r => r.json()),
+      fetch(endpoints.pattern).then(r => r.json()),
+    ]);
+
+    // 提取现价
+    const prices = [longR, shortR, bsR, patternR]
+      .filter(r => r.success && r.data && r.data.current_price)
+      .map(r => r.data.current_price);
+    const price = prices.length > 0 ? prices[0] : '-';
+
+    $('r-code').textContent = code;
+    $('r-name').textContent = '';
+    $('r-time').textContent = new Date().toLocaleString('zh-CN');
+    $('r-price').textContent = price !== '-' ? price.toFixed(2) : '-';
+
+    // 渲染各 Tab
+    $('long-content').innerHTML = longR.success ? renderLongTerm(longR.data) : `<div class="alert alert-danger">${longR.error}</div>`;
+    $('short-content').innerHTML = shortR.success ? renderShortTerm(shortR.data) : `<div class="alert alert-danger">${shortR.error}</div>`;
+    $('bs-content').innerHTML = bsR.success ? renderBuySell(bsR.data) : `<div class="alert alert-danger">${bsR.error}</div>`;
+    $('pattern-content').innerHTML = patternR.success ? renderPattern(patternR.data) : `<div class="alert alert-danger">${patternR.error}</div>`;
+
+    $('results').classList.remove('d-none');
+
+    // 切换到第一个 tab
+    const tabLong = document.getElementById('tab-long');
+    if (tabLong) {
+      new bootstrap.Tab(tabLong).show();
+    }
+
+  } catch (e) {
+    $('error-box').textContent = '分析出错: ' + e.message;
+    $('error-box').classList.remove('d-none');
+  } finally {
+    $('loading').classList.add('d-none');
+  }
+}
+
+// 表单提交
+$('advisor-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const code = $('stock-code').value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    alert('请输入6位数字股票代码');
+    return;
+  }
+  runAnalysis(code);
+});
+
+// 支持回车提交
+$('stock-code').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    $('advisor-form').dispatchEvent(new Event('submit'));
+  }
+});
+</script>
+{% endblock %}
