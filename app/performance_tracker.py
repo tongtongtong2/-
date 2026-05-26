@@ -100,6 +100,9 @@ class PerformanceTracker:
                 logger.warning("跳过 %s：缺少有效行情", rec.stock_code)
                 continue
 
+            if rec.recommend_price is None:
+                logger.warning("跳过 %s：recommend_price 为空", rec.stock_code)
+                continue
             recommend_price = float(rec.recommend_price)
             change_percent = (current_price - recommend_price) / recommend_price if recommend_price else 0.0
 

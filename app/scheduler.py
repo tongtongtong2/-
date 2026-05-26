@@ -39,17 +39,6 @@ def run_daily_selection(app, force: bool = False) -> int:
             logger.info("非交易日，跳过选股")
             return 0
 
-        # 去重逻辑：先删掉今天 source='system' 的旧推荐，再重新选
-        # （保证始终是最新的 TOP_N 结果，且不会被 run_select.py 的旧数据污染）
-        deleted = (
-            StockRecommendation.query
-            .filter_by(recommend_date=today, source="system")
-            .delete(synchronize_session=False)
-        )
-        if deleted:
-            db.session.commit()
-            logger.info("已清除今日 %d 条旧系统推荐，重新选股", deleted)
-
         # 市场环境检查
         selector = StockSelector(min_volume=Config.MIN_VOLUME)
         if Config.MARKET_FILTER and not selector._check_market_regime():
@@ -59,6 +48,15 @@ def run_daily_selection(app, force: bool = False) -> int:
         if not picks:
             logger.warning("选股结果为空")
             return 0
+
+        # 选股成功后再删旧数据（避免选股失败导致当天数据丢失）
+        deleted = (
+            StockRecommendation.query
+            .filter_by(recommend_date=today, source="system")
+            .delete(synchronize_session=False)
+        )
+        if deleted:
+            logger.info("已清除今日 %d 条旧系统推荐，替换为新结果", deleted)
 
         inserted = 0
         for p in picks:

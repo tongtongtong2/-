@@ -19,32 +19,38 @@ def _make_daily(prices):
     )
 
 
-def test_momentum_score_returns_three_returns():
-    daily = _make_daily(list(range(100, 130)))
-    score = StockSelector.calculate_momentum_score(daily)
-    assert score is not None
-    assert "ret_5" in score and "ret_10" in score and "ret_20" in score
-    assert score["ret_5"] > 0
-
-
-def test_momentum_score_none_for_short_history():
-    daily = _make_daily([10, 11, 12])
-    assert StockSelector.calculate_momentum_score(daily) is None
-
-
-def test_breakout_score_detects_new_high():
-    prices = [10] * 25 + [12]  # 末尾突破
+def test_compute_indicators_returns_key_fields():
+    prices = list(range(100, 180))  # 80 bars, 稳步上涨
     daily = _make_daily(prices)
-    score = StockSelector.calculate_breakout_score(daily)
-    assert score is not None
-    assert score["break_20"] >= 1.0
+    ind = StockSelector._compute_indicators(daily)
+    assert ind is not None
+    assert "ret_5" in ind and "ret_20" in ind and "ret_60" in ind
+    assert ind["ret_5"] > 0
 
 
-def test_volume_score_basic():
-    daily = _make_daily(list(range(50, 80)))
-    score = StockSelector.calculate_volume_score(daily)
-    assert score is not None
-    assert score["vol_ratio_5_20"] > 0
+def test_compute_indicators_none_for_short_history():
+    daily = _make_daily([10, 11, 12])
+    assert StockSelector._compute_indicators(daily) is None
+
+
+def test_hard_filter_passes_bullish_trend():
+    # 构造均线多头排列的数据：稳步上涨 80 天
+    prices = [50 + i * 0.5 for i in range(80)]
+    daily = _make_daily(prices)
+    ind = StockSelector._compute_indicators(daily)
+    assert ind is not None
+    passed, _ = StockSelector._passes_hard_filter(ind)
+    assert passed
+
+
+def test_hard_filter_rejects_bearish_trend():
+    # 构造均线空头排列的数据：先涨后跌
+    prices = [50 + i * 0.5 for i in range(40)] + [70 - i * 0.5 for i in range(40)]
+    daily = _make_daily(prices)
+    ind = StockSelector._compute_indicators(daily)
+    assert ind is not None
+    passed, reason = StockSelector._passes_hard_filter(ind)
+    assert not passed
 
 
 def test_prefilter_removes_st_and_low_turnover():

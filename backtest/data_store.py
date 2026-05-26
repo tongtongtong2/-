@@ -177,7 +177,7 @@ class DataStore:
                    ORDER BY trade_date DESC LIMIT ?""",
                 self._conn, params=(f"{code}.%", end_date, days))
             return df
-        except:
+        except Exception:
             return None
 
     def count_bars(self) -> int:
@@ -195,5 +195,5 @@ class DataStore:
                 (code,))
             row = cur.fetchone()
             return row[0] if row else ""
-        except:
+        except Exception:
             return ""

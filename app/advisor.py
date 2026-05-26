@@ -479,7 +479,7 @@ def find_similar_patterns(stock_code: str, lookback: int = 60, top_n: int = 5) -
                 cross_matches.append({"stock_code": code, "correlation": round(float(corr), 3)})
         cross_matches.sort(key=lambda x: x["correlation"], reverse=True)
     except Exception as e:
-        logger.warning(f"跨股票匹配失败: {e}")
+        logger.warning("跨股票匹配失败: %s", e)
 
     # 统计后续平均收益
     avg_future = {}
@@ -490,7 +490,7 @@ def find_similar_patterns(stock_code: str, lookback: int = 60, top_n: int = 5) -
             if v:
                 try:
                     vals.append(float(v.replace("%", "")))
-                except:
+                except (ValueError, TypeError):
                     pass
         if vals:
             avg_future[period] = f"{np.mean(vals):.2f}%"

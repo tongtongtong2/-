@@ -1,4 +1,5 @@
 import os
+from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -20,7 +21,7 @@ class Config:
 
     # SQLAlchemy Configuration
     SQLALCHEMY_DATABASE_URI = (
-        f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@"
+        f"mysql+pymysql://{quote_plus(MYSQL_USER)}:{quote_plus(MYSQL_PASSWORD)}@"
         f"{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
     )
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -42,7 +43,7 @@ class Config:
 
     # Trading Parameters
     try:
-        TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', 0.15))
+        TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', 0.10))
     except ValueError:
         raise ValueError("TAKE_PROFIT must be a valid float")
     try:

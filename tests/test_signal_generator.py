@@ -50,10 +50,10 @@ def test_normal_change_returns_hold():
     assert signal == "hold"
 
 
-def test_ma_deterioration_with_low_return_sells():
-    # 先涨后跌，造成 5 日均线低于 10 日均线
-    closes = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 18, 17, 16, 15, 14]
+def test_ma_deterioration_with_negative_return_sells():
+    # 先涨后跌，造成 MA10 低于 MA20；change_percent 为负才触发卖出
+    closes = list(range(10, 30)) + list(range(29, 14, -1))  # 20 bars 上涨 + 15 bars 下跌
     g = SignalGenerator()
-    signal, reason = g.generate_signal(0.01, history=_fake_history(closes), hold_days=5)
+    signal, reason = g.generate_signal(-0.03, history=_fake_history(closes), hold_days=5)
     assert signal == "sell"
-    assert "均线" in reason
+    assert "MA10" in reason

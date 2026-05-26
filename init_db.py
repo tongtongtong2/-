@@ -13,7 +13,8 @@ def create_database():
     )
     try:
         with connection.cursor() as cursor:
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {Config.MYSQL_DATABASE} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            db_name = Config.MYSQL_DATABASE.replace('`', '``')
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
             print(f"数据库 {Config.MYSQL_DATABASE} 已创建或已存在")
     finally:
         connection.close()

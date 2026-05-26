@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Dict, Optional
 import time
 
 from flask import Blueprint, current_app, jsonify, render_template, request
@@ -485,10 +485,11 @@ def api_toggle_watch(rec_id: int):
         return jsonify({"success": False, "error": "该推荐已作废（次日未成交）"}), 400
     try:
         if rec.is_watched:
-            rec.is_watched = False
-            rec.watched_at = None
+            # 移出观察池：删除关联的 daily_performance 记录，再删除推荐本身
+            StockDailyPerformance.query.filter_by(recommendation_id=rec.id).delete()
+            db.session.delete(rec)
             db.session.commit()
-            return jsonify({"success": True, "is_watched": False})
+            return jsonify({"success": True, "is_watched": False, "deleted": True})
 
         rec.is_watched = True
         rec.watched_at = datetime.utcnow()
@@ -559,6 +560,7 @@ def api_trigger_open_fill():
 # ----------------------------------------------------------------------
 _analyze_cache: Dict[str, tuple[float, Dict]] = {}  # code -> (timestamp, result)
 _ANALYZE_CACHE_TTL = 300  # 5 分钟内同股票不重复拉 API
+_ANALYZE_CACHE_MAX = 200  # 最多缓存 200 只股票
 
 
 @bp.route("/api/analyze/<stock_code>", methods=["GET"])
@@ -600,6 +602,10 @@ def api_analyze(stock_code: str):
             }
 
         _analyze_cache[code] = (time.time(), result)
+        # 超过上限时清除最旧的条目
+        if len(_analyze_cache) > _ANALYZE_CACHE_MAX:
+            oldest_key = min(_analyze_cache, key=lambda k: _analyze_cache[k][0])
+            del _analyze_cache[oldest_key]
         return jsonify({"success": True, **result})
     except Exception as exc:  # noqa: BLE001
         logger.exception("单股分析失败 %s", code)
@@ -723,8 +729,6 @@ def api_update_price(rec_id: int):
 @bp.route("/api/rec/<int:rec_id>/curprice", methods=["POST"])
 def api_update_curprice(rec_id: int):
     """更新最新现价，自动重算涨跌幅。"""
-    from sqlalchemy import desc
-
     rec = StockRecommendation.query.get(rec_id)
     if rec is None:
         return jsonify({"success": False, "error": "推荐不存在"}), 404
@@ -790,7 +794,6 @@ def api_update_shares(rec_id: int):
         db.session.commit()
 
         cost = float(rec.recommend_price) if rec.recommend_price else 0
-        from sqlalchemy import desc
         latest = (
             StockDailyPerformance.query
             .filter_by(recommendation_id=rec.id)
@@ -834,7 +837,7 @@ def api_market_status():
         with urllib.request.urlopen(req, timeout=5) as resp:
             raw = resp.read().decode("gbk")
             parts = raw.split("~")
-            if len(parts) > 3:
+            if len(parts) > 33:
                 result["sh300"] = float(parts[3])
                 result["change_pct"] = float(parts[32]) if parts[32] else 0
     except Exception:
