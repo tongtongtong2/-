@@ -265,48 +265,79 @@ function renderBuySell(data) {
 function renderPattern(data) {
   if (data.error) return `<div class="alert alert-warning">${data.error}</div>`;
 
-  let matchesHtml = '';
-  for (const m of data.self_matches || []) {
-    let futureHtml = '';
-    for (const [k, v] of Object.entries(m.future || {})) {
-      const cls = v.startsWith('-') ? 'text-danger' : 'text-success';
-      futureHtml += `<span class="badge bg-light ${cls} me-1">${k}: ${v}</span>`;
+  const selfCount = (data.self_matches || []).length;
+  const crossCount = (data.cross_matches || []).length;
+
+  // 自匹配表格
+  let selfHtml = '';
+  if (selfCount > 0) {
+    for (const m of data.self_matches) {
+      let futureHtml = '';
+      for (const [k, v] of Object.entries(m.future || {})) {
+        const cls = v.startsWith('-') ? 'text-danger' : 'text-success';
+        futureHtml += `<span class="badge bg-light ${cls} me-1">${k}: ${v}</span>`;
+      }
+      const corrPct = (m.correlation * 100).toFixed(1);
+      const corrCls = m.correlation > 0.5 ? 'text-success' : 'text-warning';
+      selfHtml += `<tr>
+        <td>${m.start}</td><td>${m.end}</td>
+        <td class="${corrCls} fw-bold">${corrPct}%</td>
+        <td>${futureHtml || '-'}</td>
+      </tr>`;
     }
-    matchesHtml += `<tr>
-      <td>${m.start}</td>
-      <td>${m.end}</td>
-      <td><b>${(m.correlation * 100).toFixed(1)}%</b></td>
-      <td>${futureHtml || '-'}</td>
-    </tr>`;
   }
 
+  // 跨股票匹配
+  let crossHtml = '';
+  if (crossCount > 0) {
+    crossHtml = '<div class="card mt-3"><div class="card-header fw-bold">🔗 相似走势的股票</div><div class="card-body">';
+    for (const m of data.cross_matches) {
+      const corrPct = (m.correlation * 100).toFixed(1);
+      crossHtml += `<span class="badge bg-primary me-2 mb-1">${m.stock_code} (${corrPct}%)</span>`;
+    }
+    crossHtml += '</div></div>';
+  }
+
+  // 平均收益
   let avgHtml = '';
   for (const [k, v] of Object.entries(data.avg_future || {})) {
-    avgHtml += `<span class="badge bg-info me-1">${k}: ${v}</span>`;
+    const cls = v.startsWith('-') ? 'text-danger' : 'text-success';
+    avgHtml += `<span class="badge bg-light ${cls} fs-6 me-2">${k}: ${v}</span>`;
+  }
+
+  let emptyNote = '';
+  if (selfCount === 0) {
+    emptyNote = `<div class="alert alert-info"><b>未找到高度相似的历史图形</b><br>
+      该股近 ${data.lookback_days} 天走势在自身历史中较为独特。<br>
+      相似度阈值: 25%（偏高），这可能意味着近期走势属于新形态。</div>`;
   }
 
   return `
     <div class="card mb-3">
       <div class="card-header fw-bold">📈 历史相似走势统计</div>
       <div class="card-body">
-        <div class="mb-2">基于近 <b>${data.lookback_days}</b> 天走势，历史相似图形后续平均收益:</div>
-        <div class="fs-5 mb-2">${avgHtml || '<span class="text-muted">-</span>'}</div>
+        <div class="mb-2">基于近 <b>${data.lookback_days}</b> 天走势，在 ${data.total_windows || '?'} 个历史窗口中搜索</div>
+        <div class="mb-2">找到 <b>${selfCount}</b> 个自身相似片段，<b>${crossCount}</b> 只走势相似的股票</div>
+        ${avgHtml ? `<div class="fs-5 mb-2">历史相似图形后续平均: ${avgHtml}</div>` : ''}
         <div class="text-muted small">⚠ ${data.note}</div>
       </div>
     </div>
+    ${emptyNote}
+    ${selfCount > 0 ? `
     <div class="card">
-      <div class="card-header fw-bold">🔍 历史相似片段 (Top ${(data.self_matches || []).length})</div>
+      <div class="card-header fw-bold">🔍 自身历史相似片段</div>
       <div class="card-body p-0">
         <div class="table-responsive">
           <table class="table table-striped table-hover mb-0 small">
             <thead class="table-dark">
               <tr><th>起始</th><th>结束</th><th>相似度</th><th>后续表现</th></tr>
             </thead>
-            <tbody>${matchesHtml || '<tr><td colspan="4" class="text-muted">未找到相似图形</td></tr>'}</tbody>
+            <tbody>${selfHtml}</tbody>
           </table>
         </div>
       </div>
-    </div>`;
+    </div>` : ''}
+    ${crossHtml}`;
 }
 
 // 分析流程

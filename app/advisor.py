@@ -455,6 +455,32 @@ def find_similar_patterns(stock_code: str, lookback: int = 60, top_n: int = 5) -
     self_matches.sort(key=lambda x: x["correlation"], reverse=True)
     top_self = self_matches[:top_n]
 
+    # 跨股票匹配：在全部股票中搜索相似走势
+    cross_matches = []
+    try:
+        conn = _get_db()
+        all_codes = pd.read_sql_query(
+            "SELECT DISTINCT stock_code FROM daily_bars", conn
+        )["stock_code"].tolist()
+        conn.close()
+        for code in all_codes[:100]:
+            if code == stock_code:
+                continue
+            other = _load_daily(code, days=800)
+            if other.empty or len(other) < lookback + 20:
+                continue
+            other_ret = other["close"].pct_change().dropna()
+            if len(other_ret) < lookback:
+                continue
+            other_recent = other_ret.iloc[-lookback:].values
+            other_norm = (other_recent - other_recent.mean()) / (other_recent.std() + 1e-10)
+            corr = np.corrcoef(query_norm, other_norm)[0, 1]
+            if not np.isnan(corr) and corr > 0.4:
+                cross_matches.append({"stock_code": code, "correlation": round(float(corr), 3)})
+        cross_matches.sort(key=lambda x: x["correlation"], reverse=True)
+    except Exception as e:
+        logger.warning(f"跨股票匹配失败: {e}")
+
     # 统计后续平均收益
     avg_future = {}
     for period in ["5日", "10日", "20日"]:
@@ -469,10 +495,14 @@ def find_similar_patterns(stock_code: str, lookback: int = 60, top_n: int = 5) -
         if vals:
             avg_future[period] = f"{np.mean(vals):.2f}%"
 
+    total_windows = len(ret_series) - lookback
+
     return {
         "stock_code": stock_code,
         "lookback_days": lookback,
+        "total_windows": total_windows,
         "self_matches": top_self,
+        "cross_matches": cross_matches[:top_n],
         "avg_future": avg_future,
         "note": "历史图形相似不保证未来走势相同，仅供参考",
     }

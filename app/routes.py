@@ -218,6 +218,27 @@ def index():
     for item in rec_items:
         item["history_count"] = history_freq.get(item["stock_code"], 0)
 
+    # ── 获取推荐股的实时行情（解决"现价=推荐价"问题）──
+    rec_no_shares = [r for r in recs if (r.shares or 0) == 0]
+    if rec_no_shares:
+        try:
+            from app.data_fetcher import get_default_fetcher
+            fetcher = get_default_fetcher()
+            spot = fetcher.get_realtime_prices([r.stock_code for r in rec_no_shares])
+            if not spot.empty and "stock_code" in spot.columns:
+                spot_map = spot.set_index("stock_code")
+                for item in rec_items:
+                    code = item.get("stock_code", "")
+                    if item.get("shares", 0) == 0 and code in spot_map.index:
+                        row = spot_map.loc[code]
+                        real_price = float(row["current_price"])
+                        rec_price = item.get("recommend_price", 0)
+                        if real_price > 0 and rec_price > 0:
+                            item["current_price"] = round(real_price, 2)
+                            item["change_percent"] = round((real_price - rec_price) / rec_price, 4)
+        except Exception:
+            pass  # 行情获取失败时保持原样
+
     # ── 持仓总盈亏（含手续费）──
     total_pnl = sum(
         (item.get("net_pnl") or item.get("pnl_amount") or 0) for item in holding_items
