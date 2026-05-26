@@ -96,6 +96,9 @@ def _recommendation_to_dict(rec: StockRecommendation, latest: Optional[StockDail
     chg = float(latest.change_percent) if latest and latest.change_percent is not None else None
     if chg is None and reason_chg is not None:
         chg = float(reason_chg)
+        # recommend_reason 中的 change_percent 可能是百分数(如2.4)而非小数(0.024)
+        if abs(chg) > 1:
+            chg = chg / 100
 
     # 简单 P&L（不含费）
     simple_pnl = round((cur - cost) * shares, 2) if shares > 0 else 0

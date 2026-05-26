@@ -482,7 +482,7 @@ def _save_to_database(top: pd.DataFrame, top_n: int = 10):
                 "position": float(row.get("position", 0)),
                 "history_count": int(row.get("history_count", 0)),
                 "current_price": float(row["current_price"]),
-                "change_percent": float(row["change_percent"]),
+                "change_percent": float(row["change_percent"]) / 100,  # 统一存小数
             }
             import json
             reason_json = json.dumps(reason, ensure_ascii=False)
