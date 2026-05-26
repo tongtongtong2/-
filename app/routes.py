@@ -20,6 +20,7 @@ from app.scheduler import (
     run_open_price_fill,
 )
 from app.utils import get_logger
+from config import Config
 
 logger = get_logger(__name__)
 bp = Blueprint("main", __name__)
