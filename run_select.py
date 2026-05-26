@@ -407,7 +407,7 @@ def main():
     factors = pd.DataFrame(rows)
     scored = score_dataframe(factors, history_freq)
     scored = scored.sort_values("total_score", ascending=False)
-    top = scored.head(10)
+    top = scored.head(Config.TOP_N_STOCKS)
 
     print(f"\n{'='*60}")
     print(f"  今日推荐 TOP {len(top)}")
@@ -446,7 +446,7 @@ def main():
 
 
 def _save_to_database(top: pd.DataFrame, top_n: int = 10):
-    """将 TOP N 推荐写入 stock_recommendations 表（upsert）。"""
+    """将 TOP N 推荐写入 stock_recommendations 表（先清旧数据再插入）。"""
     import pymysql
     from config import Config
     today = date.today().isoformat()
@@ -458,6 +458,12 @@ def _save_to_database(top: pd.DataFrame, top_n: int = 10):
             connect_timeout=5,
         )
         cursor = conn.cursor()
+        # 先清除今日旧推荐
+        cursor.execute(
+            "DELETE FROM stock_recommendations WHERE recommend_date=%s AND source='system'",
+            (today,)
+        )
+        deleted = cursor.rowcount
         saved = 0
         for _, row in top.head(top_n).iterrows():
             code = row["stock_code"]

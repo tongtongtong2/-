@@ -164,10 +164,12 @@ def index():
         .all()
     )
 
-    # ── 今日推荐（全部，含系统和用户手动）──
+    # ── 今日推荐（限 TOP_N 条，按 recommend_reason 中的 total_score 降序）──
     recs = (
         StockRecommendation.query.filter_by(recommend_date=target_date)
+        .filter(StockRecommendation.source == "system")
         .order_by(StockRecommendation.id.asc())
+        .limit(Config.TOP_N_STOCKS)
         .all()
     )
 
