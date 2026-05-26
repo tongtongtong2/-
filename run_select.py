@@ -24,6 +24,8 @@ import numpy as np
 import pandas as pd
 import requests
 
+from config import Config
+
 # ============================================================
 # 腾讯行情接口
 # ============================================================
@@ -490,8 +492,8 @@ def _save_to_database(top: pd.DataFrame, top_n: int = 10):
             cursor.execute(
                 "INSERT INTO stock_recommendations "
                 "(stock_code, stock_name, recommend_date, recommend_price, "
-                " price_status, recommend_reason, status, source) "
-                "VALUES (%s,%s,%s,%s,'filled',%s,'active','system') "
+                " price_status, recommend_reason, status, source, is_watched) "
+                "VALUES (%s,%s,%s,%s,'filled',%s,'active','system',0) "
                 "ON DUPLICATE KEY UPDATE "
                 "recommend_price=VALUES(recommend_price), "
                 "recommend_reason=VALUES(recommend_reason)",
