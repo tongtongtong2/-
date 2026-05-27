@@ -15,6 +15,9 @@ from datetime import date, datetime, timedelta
 from config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ── 板块资金流（东方财富API）──
+
+
 for _k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
            "http_proxy", "https_proxy", "all_proxy"):
     os.environ.pop(_k, None)
@@ -206,7 +209,127 @@ def passes_hard_filter(ind):
     return True, ""
 
 
-def score_dataframe(factors: pd.DataFrame, history_freq: dict = None) -> pd.DataFrame:
+# ══════════════════════════════════════════════════════
+# 板块资金流因子（东方财富 API）
+# ══════════════════════════════════════════════════════
+
+# stock_info_new 行业 → 东方财富板块名称映射
+INDUSTRY_TO_SECTOR = {
+    "电气设备": "电力设备", "元器件": "元件", "半导体": "半导体",
+    "通信设备": "通信设备", "汽车配件": "汽车零部件", "汽车整车": "汽车整车",
+    "专用机械": "通用设备", "工程机械": "通用设备", "机械基件": "通用设备",
+    "机床制造": "通用设备", "轻工机械": "通用设备", "纺织机械": "通用设备",
+    "化工原料": "基础化工", "化学制药": "医药生物", "生物制药": "医药生物",
+    "医疗保健": "医药生物", "医药商业": "医药商业", "中成药": "中药",
+    "软件服务": "软件开发", "互联网": "互联网服务", "IT设备": "计算机设备",
+    "电器仪表": "计算机设备", "航空": "航天航空", "船舶": "船舶制造",
+    "银行": "银行", "证券": "证券", "保险": "保险",
+    "白酒": "酿酒行业", "啤酒": "酿酒行业", "红黄酒": "酿酒行业",
+    "家用电器": "家电行业", "家居用品": "装修建材",
+    "水泥": "水泥建材", "玻璃": "玻璃玻纤", "陶瓷": "装修建材",
+    "其他建材": "装修建材", "装修装饰": "装修建材",
+    "普钢": "钢铁行业", "特种钢": "钢铁行业", "钢加工": "钢铁行业",
+    "火力发电": "电力行业", "水力发电": "电力行业", "新型电力": "电力行业",
+    "供气供热": "公用事业", "水务": "公用事业", "环境保护": "环保行业",
+    "煤炭开采": "煤炭行业", "焦炭加工": "煤炭行业",
+    "小金属": "小金属", "黄金": "贵金属",
+    "铜": "有色金属", "铝": "有色金属", "铅锌": "有色金属", "矿物制品": "非金属材料",
+    "石油开采": "石油行业", "石油加工": "石油行业", "石油贸易": "石油行业",
+    "食品": "食品饮料", "乳制品": "食品饮料", "软饮料": "食品饮料",
+    "饲料": "农牧饲渔", "农业综合": "农牧饲渔", "种植业": "农牧饲渔",
+    "渔业": "农牧饲渔", "农药化肥": "农药兽药", "日用化工": "化学制品",
+    "塑料": "塑料制品", "橡胶": "橡胶制品", "化纤": "化纤行业",
+    "服饰": "纺织服装", "纺织": "纺织服装",
+    "全国地产": "房地产开发", "区域地产": "房地产开发", "房产服务": "房地产服务",
+    "建筑工程": "工程建设", "批发业": "贸易行业", "商贸代理": "贸易行业",
+    "仓储物流": "物流行业", "水运": "航运港口", "港口": "航运港口",
+    "空运": "航空机场", "机场": "航空机场",
+    "铁路": "铁路公路", "公路": "铁路公路", "路桥": "铁路公路",
+    "公共交通": "铁路公路",
+    "旅游景点": "旅游酒店", "旅游服务": "旅游酒店", "酒店餐饮": "旅游酒店",
+    "出版业": "文化传媒", "影视音像": "文化传媒", "广告包装": "文化传媒",
+    "文教休闲": "教育", "染料涂料": "化学制品",
+    "造纸": "造纸印刷", "汽车服务": "汽车服务",
+    "超市连锁": "商业百货", "百货": "商业百货", "商品城": "商业百货",
+    "园区开发": "房地产开发",
+    "综合类": "综合行业", "运输设备": "交运设备",
+    "电信运营": "通信服务",
+}
+
+def fetch_eastmoney_sector_flow():
+    """拉取东方财富概念板块资金流向，返回 {板块名: 主力净流入(万元)}"""
+    import requests
+    session = requests.Session()
+    session.trust_env = False
+    session.proxies = {"http": None, "https": None}
+    
+    params = {
+        "pn": "1", "pz": "200", "po": "1", "np": "1",
+        "ut": "b2884a393a59ad64002292a3e90d46a5",
+        "fltt": "2", "invt": "2", "fid0": "f62",
+        "fs": "m:90+t:2", "stat": "1",
+        "fields": "f12,f14,f2,f3,f62",
+    }
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://data.eastmoney.com/",
+    }
+    
+    try:
+        resp = session.get(
+            "http://push2.eastmoney.com/api/qt/clist/get",
+            params=params, headers=headers, timeout=15
+        )
+        data = resp.json()
+        if data.get("rc") == 0 and data.get("data") and data["data"].get("diff"):
+            flows = {}
+            for item in data["data"]["diff"]:
+                name = item.get("f14", "")
+                inflow = float(item.get("f62", 0) or 0)
+                flows[name] = inflow
+            print(f"  板块资金流加载: {len(flows)} 个板块")
+            return flows
+        else:
+            print(f"  板块资金流API异常 rc={data.get('rc')}")
+            return {}
+    except Exception as e:
+        print(f"  板块资金流获取失败: {e}")
+        return {}
+
+
+def get_sector_flow_bonus(stock_code, sector_flows, industry_map):
+    """根据股票行业，返回板块资金流加分（-10~+10）"""
+    industry = industry_map.get(stock_code, "")
+    if not industry:
+        return 0
+    
+    sector = INDUSTRY_TO_SECTOR.get(industry, "")
+    if not sector:
+        # 尝试模糊匹配
+        for sname in sector_flows:
+            if industry in sname or sname in industry:
+                sector = sname
+                break
+    
+    if not sector or sector not in sector_flows:
+        return 0
+    
+    inflow = sector_flows[sector]  # 元
+    
+    # 映射到 -10 ~ +10 加分（inflow 单位：元）
+    if inflow > 1_000_000_000:      # >10亿 → 满分
+        return 10
+    elif inflow > 300_000_000:      # 3-10亿
+        return 7
+    elif inflow > 0:
+        return 4
+    elif inflow > -300_000_000:
+        return -4
+    elif inflow > -1_000_000_000:
+        return -7
+    else:
+        return -10
+def score_dataframe(factors: pd.DataFrame, history_freq: dict = None, sector_flows: dict = None, industry_map: dict = None) -> pd.DataFrame:
     df = factors.copy()
 
     def zrank(s):
@@ -250,13 +373,23 @@ def score_dataframe(factors: pd.DataFrame, history_freq: dict = None) -> pd.Data
     df["dd_penalty"] = df["max_dd"].apply(lambda x: max(0, abs(x) - 0.15) * 200)
     df["dd_penalty"] = df["dd_penalty"].clip(upper=15)
 
+
+    # ── 板块资金流因子（5%）：优先资金流入板块 ──
+    if sector_flows and industry_map:
+        df["sector_flow_bonus"] = df["stock_code"].apply(
+            lambda c: get_sector_flow_bonus(c, sector_flows, industry_map)
+        )
+    else:
+        df["sector_flow_bonus"] = 0
+    df["sector_flow_factor"] = df["sector_flow_bonus"] * 0.50
     df["total_score"] = (
         df["trend_strength"] * 0.8929 +
         df["trend_smooth"] * 1.00 +
         df["volume_factor"] * 1.00 +
         df["position"] * 1.00 +
         df["liquidity"] * 0.75 +
-        df["history_factor"] * 1.20 -
+        df["history_factor"] * 1.20 +
+        df["sector_flow_factor"] * 1.00 -
         df["dd_penalty"]
     )
     return df
@@ -405,10 +538,31 @@ def main():
         sys.exit(0)
 
     # 4) 打分排序（含历史连续性因子）
-    print(f"\n[4/4] 五因子+历史连续性打分...")
+
+    # ── 获取板块资金流和行业映射 ──
+    sector_flows = fetch_eastmoney_sector_flow()
+    # 从 SQLite 获取候选股票的行业信息
+    import sqlite3
+    industry_map = {}
+    try:
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "backtest", "data", "market_data.db")
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        codes = [r["stock_code"] for r in rows]
+        placeholders = ",".join(["?" for _ in codes])
+        cur.execute("SELECT stock_code, industry FROM stock_info_new WHERE stock_code IN (" + placeholders + ")", codes)
+        for row_ in cur.fetchall():
+            industry_map[row_[0]] = row_[1] or ""
+        conn.close()
+        print(f"  行业映射加载: {len(industry_map)} 只")
+    except Exception as e:
+        print(f"  行业映射加载失败: {e}")
+
+    print(f"\n[4/4] 六因子+历史连续性打分...")
     history_freq = get_history_frequency(lookback_days=7)
     factors = pd.DataFrame(rows)
-    scored = score_dataframe(factors, history_freq)
+    scored = score_dataframe(factors, history_freq, sector_flows, industry_map)
     scored = scored.sort_values("total_score", ascending=False)
     top = scored.head(Config.TOP_N_STOCKS)
 

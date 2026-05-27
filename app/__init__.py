@@ -16,5 +16,7 @@ def create_app():
 
     from app import routes
     app.register_blueprint(routes.bp)
+    from app.etf_routes import etf_bp
+    app.register_blueprint(etf_bp)
 
     return app

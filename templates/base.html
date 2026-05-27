@@ -39,6 +39,17 @@
         <li class="nav-item">
           <a class="nav-link {% if nav == 'advisor' %}active{% endif %}" href="{{ url_for('main.advisor') }}">📋 投资顾问</a>
         </li>
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle {% if nav and nav.startswith('etf') %}active{% endif %}" href="#" role="button" data-bs-toggle="dropdown">
+            📊 ETF 交易
+          </a>
+          <ul class="dropdown-menu dropdown-menu-dark">
+            <li><a class="dropdown-item" href="{{ url_for('etf.overview') }}">📋 基金池总览</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('etf.ranking') }}">🎯 智能选基排名</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('etf.flow') }}">💰 板块资金流</a></li>
+            <li><a class="dropdown-item" href="{{ url_for('etf.pnl') }}">📈 持仓盈亏</a></li>
+          </ul>
+        </li>
       </ul>
       <span class="navbar-text small text-warning">仅供研究学习，不构成投资建议</span>
     </div>
