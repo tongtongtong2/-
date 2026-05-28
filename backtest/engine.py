@@ -19,13 +19,19 @@ TAKE_PROFIT = 0.15
 STOP_LOSS = -0.05
 MAX_HOLD_DAYS = 30
 TOP_N = 10
-MAX_POSITIONS = 10
+MAX_POSITIONS = 8
 MIN_DAILY_BARS = 70
 MAX_RET_5 = 0.15
 MAX_RET_20 = 0.40
 MAX_VOL_STD = 0.04
 LIMIT_UP_MAIN = 9.5
 LIMIT_UP_GROWTH = 19.5
+
+# ATR 动态止盈止损参数
+ATR_SL_MULT = 2.0       # 止损跟踪 2倍ATR
+ATR_TP_MULT = 4.0       # 止盈 = 4倍ATR
+ATR_TRAIL_MULT = 2.0    # 盈利超过2倍ATR后启动移动止盈
+ATR_TRAIL_BACK = 1.0    # 移动止盈回撤1倍ATR平仓
 
 
 # ---- 数据结构 ----
@@ -36,6 +42,8 @@ class Position:
     entry_price: float
     entry_date: str
     hold_days: int = 0
+    highest_price: float = 0.0
+    atr_at_entry: float = 0.0
 
 
 @dataclass
@@ -131,6 +139,8 @@ def passes_hard_filter(ind: dict) -> tuple[bool, str]:
 
 
 def score_dataframe(factors: pd.DataFrame) -> pd.DataFrame:
+    """v8 新版打分：Config权重 + 策略引擎 + dd_penalty。
+    回测中跳过需要API的因子（板块/北向/股东/基本面），中性处理。"""
     df = factors.copy()
 
     def zrank(s):
@@ -144,20 +154,82 @@ def score_dataframe(factors: pd.DataFrame) -> pd.DataFrame:
         score = 100 * (1 - over / half)
         return score.clip(lower=0, upper=100)
 
-    df["trend_strength"] = zrank(df["ret_60"]) * 0.162 + zrank((df["last"] / df["ma20"]) - 1) * 0.108
-    df["trend_smooth"] = zrank(-df["vol_std"]) * 0.135 + zrank(df["max_dd"]) * 0.09
-    df["volume_factor"] = bell_score(df["vol_ratio_5_20"], 1.0, 2.0) * 0.18
-    df["position"] = bell_score(df["dist_high60"], 0.05, 0.15) * 0.135
-    df["liquidity"] = zrank(df["avg_turnover_20"]) * 0.09
-    # 主力资金因子：5日净流入占成交额比
-    if "mf_ratio_5" in df.columns:
-        df["moneyflow"] = zrank(df["mf_ratio_5"]) * 0.10
-    else:
-        df["moneyflow"] = 0
+    # ── 六因子 ──
+    df["score_ret60"] = zrank(df["ret_60"])
+    df["bias_ma20"] = (df["last"] / df["ma20"]) - 1
+    df["score_bias"] = zrank(df["bias_ma20"])
+    df["trend_strength"] = df["score_ret60"] * 0.64 + df["score_bias"] * 0.36
+
+    df["score_smooth_std"] = zrank(-df["vol_std"])
+    df["score_smooth_dd"] = zrank(df["max_dd"])
+    df["trend_smooth"] = df["score_smooth_std"] * 0.60 + df["score_smooth_dd"] * 0.40
+
+    df["score_vol"] = bell_score(df["vol_ratio_5_20"], 1.0, 2.0)
+    df["volume_factor"] = df["score_vol"]
+
+    df["score_pos"] = bell_score(df["dist_high60"], 0.05, 0.20)
+    df["position"] = df["score_pos"]
+
+    df["score_liq"] = zrank(df["avg_turnover_20"])
+    df["liquidity"] = df["score_liq"]
+
+    # ── 回测中性值 ──
+    df["sector_flow_factor"] = 50.0
+    df["individual_flow_score"] = 50.0
+    df["northbound_score"] = 50.0
+    df["shareholder_bonus"] = 0.0
+    df["history_factor"] = 0.0
+
+    # ── 回撤惩罚 ──
+    df["dd_penalty"] = df["max_dd"].apply(lambda x: max(0, abs(x) - 0.15) * 200)
+    df["dd_penalty"] = df["dd_penalty"].clip(upper=15)
+
+    # ── 多策略命中 ──
+    from strategy_engine import StrategyEngine; engine = StrategyEngine()
+    strategy_results = []
+    for _, row in df.iterrows():
+        stock_data = {
+            "close": row.get("last", row.get("close", 0)),
+            "open": row.get("open", 0),
+            "high": row.get("high", 0),
+            "low": row.get("low", 0),
+            "prev_close": row.get("prev_close", 0),
+            "change_pct": row.get("change_percent", 0),
+            "ma5": row.get("ma5", 0),
+            "ma10": row.get("ma10", 0),
+            "ma20": row.get("ma20", 0),
+            "ma60": row.get("ma60", 0),
+            "ma20_slope": (row.get("ma20", 0) / row.get("ma60", 1) - 1) if row.get("ma60", 0) > 0 else 0,
+            "vol_ratio_5_20": row.get("vol_ratio_5_20", 1.0),
+            "volume_ratio": row.get("vol_ratio_5_20", 1.0),
+            "dist_from_high_60d": row.get("dist_high60", 0),
+            "dist_from_high_20d": row.get("dist_high20", row.get("dist_high60", 0)),
+            "ret_60": row.get("ret_60", 0),
+            "ret_5": row.get("ret_5", 0),
+            "ma5_cross_ma10_days": row.get("ma5_cross_ma10_days", 99),
+            "macd_golden_cross": row.get("macd_golden_cross", False),
+        }
+        result = engine.evaluate(stock_data)
+        strategy_results.append(result)
+
+    df["strategy_hit_count"] = [r["hit_count"] for r in strategy_results]
+    df["strategy_bonus"] = [r["total_bonus"] for r in strategy_results]
+
+    from config import Config
+    # ── 总分 ──
     df["total_score"] = (
-        df["trend_strength"] + df["trend_smooth"] +
-        df["volume_factor"] + df["position"] + df["liquidity"] +
-        df["moneyflow"]
+        df["trend_strength"] * Config.W_TREND +
+        df["trend_smooth"] * Config.W_SMOOTH +
+        df["volume_factor"] * Config.W_VOLUME +
+        df["position"] * Config.W_POSITION +
+        df["liquidity"] * Config.W_LIQUIDITY +
+        df["history_factor"] * Config.W_HISTORY +
+        df["sector_flow_factor"] * Config.W_SECTOR_FLOW +
+        df["individual_flow_score"] * Config.W_INDIVIDUAL_FLOW +
+        df["northbound_score"] * Config.W_NORTHBOUND +
+        df["shareholder_bonus"] +
+        df["strategy_bonus"] * Config.W_STRATEGY -
+        df["dd_penalty"]
     )
     return df
 
@@ -174,7 +246,10 @@ class BacktestEngine:
                  min_dist_high: float = 0,
                  use_market_filter: bool = True,
                  use_atr_stop: bool = True,
-                 atr_mult: float = 2.0,
+                 atr_mult: float = ATR_SL_MULT,
+                 atr_tp_mult: float = ATR_TP_MULT,
+                 atr_trail_mult: float = ATR_TRAIL_MULT,
+                 atr_trail_back: float = ATR_TRAIL_BACK,
                  max_per_sector: int = 2,
                  trailing_stop: float = 0.0):
         self.store = store
@@ -188,6 +263,9 @@ class BacktestEngine:
         self.use_market_filter = use_market_filter
         self.use_atr_stop = use_atr_stop
         self.atr_mult = atr_mult
+        self.atr_tp_mult = atr_tp_mult
+        self.atr_trail_mult = atr_trail_mult
+        self.atr_trail_back = atr_trail_back
         self.max_per_sector = max_per_sector
         self.trailing_stop = trailing_stop
         self.positions: list[Position] = []
@@ -195,15 +273,28 @@ class BacktestEngine:
         self.daily_equity: list[tuple[str, float]] = []  # (date, equity_pct)
 
     def _is_bull_market(self, today: str) -> bool:
-        """Check if CSI 300 is above its MA60 — only trade in bull markets."""
+        """Check market regime: only trade when trend is clear (not sideways)."""
         if not self.use_market_filter:
             return True
         idx_df = self.store.get_index_daily("2000-01-01", today)
         if idx_df.empty or len(idx_df) < 60:
-            return True  # Not enough data, allow trading
+            return True
         closes = idx_df["close"].astype(float).values
         ma60 = float(np.mean(closes[-60:]))
-        return closes[-1] > ma60
+        current = closes[-1]
+        
+        # 必须在 MA60 上方
+        if current <= ma60:
+            return False
+        
+        # 震荡市检测：近20日振幅 < 5% 且 价格在MA60±3%内 → 横盘不交易
+        recent20 = closes[-20:]
+        range20 = (np.max(recent20) - np.min(recent20)) / np.mean(recent20)
+        deviation = abs(current - ma60) / ma60
+        if range20 < 0.05 and deviation < 0.03:
+            return False  # 窄幅震荡，不交易
+        
+        return True
 
     def run(self, start_date: str, end_date: str) -> list[Trade]:
         trade_dates = self.store.get_trade_dates(start_date, end_date)
@@ -212,7 +303,10 @@ class BacktestEngine:
             return []
 
         print(f"  回测区间: {trade_dates[0]} ~ {trade_dates[-1]} ({len(trade_dates)} 个交易日)")
-        print(f"  参数: 止盈 {self.take_profit*100:.0f}% / 止损 {self.stop_loss*100:.0f}% / 最长 {self.max_hold} 天")
+        if self.use_atr_stop:
+            print(f"  参数: ATR动态止盈止损 (SL={self.atr_mult}x, TP={self.atr_tp_mult}x, Trail={self.atr_trail_mult}x/{self.atr_trail_back}x) / 最长 {self.max_hold} 天")
+        else:
+            print(f"  参数: 固定止盈 {self.take_profit*100:.0f}% / 止损 {self.stop_loss*100:.0f}% / 最长 {self.max_hold} 天")
         print()
 
         for i, today in enumerate(trade_dates):
@@ -232,11 +326,16 @@ class BacktestEngine:
                         ref_close = pick["last"]
                         if bar["open"] > ref_close * 1.05:
                             continue
+                        # 记录入场时ATR
+                        daily = self.store.get_daily(pick["stock_code"], today, days=120)
+                        entry_atr = self._calc_atr(daily)
                         self.positions.append(Position(
                             code=pick["stock_code"],
                             name=pick.get("stock_name", ""),
                             entry_price=bar["open"],
                             entry_date=next_day,
+                            highest_price=bar["open"],
+                            atr_at_entry=entry_atr,
                         ))
 
             # 3. 更新持有天数
@@ -269,46 +368,56 @@ class BacktestEngine:
             bar = self.store.get_bar(pos.code, today)
             if not bar or not bar["close"]:
                 continue
-            ret = bar["close"] / pos.entry_price - 1
 
-            # 日内检查：用最高价判断止盈，最低价判断止损
-            if bar["high"] and bar["high"] / pos.entry_price - 1 >= self.take_profit:
-                exit_price = pos.entry_price * (1 + self.take_profit)
+            # 更新最高价（用于移动止盈）
+            if bar["high"] and bar["high"] > pos.highest_price:
+                pos.highest_price = bar["high"]
+
+            entry = pos.entry_price
+            atr = pos.atr_at_entry
+
+            # 计算动态止盈止损线
+            if self.use_atr_stop and atr > 0:
+                atr_pct = atr / entry
+                tp_pct = self.atr_tp_mult * atr_pct
+                sl_pct = self.atr_mult * atr_pct
+                # 限制范围：止盈 8%~25%，止损 3%~8%
+                tp_pct = max(0.08, min(0.25, tp_pct))
+                sl_pct = max(0.03, min(0.08, sl_pct))
+            else:
+                tp_pct = self.take_profit
+                sl_pct = abs(self.stop_loss)
+
+            # 1. 止盈：最高价触及止盈线
+            if bar["high"] and bar["high"] / entry - 1 >= tp_pct:
+                exit_price = entry * (1 + tp_pct)
                 self._close_position(pos, exit_price, today, "止盈")
                 to_remove.append(pos)
                 continue
 
-            # 止损逻辑：ATR 动态止损 或 固定止损
-            stop_triggered = False
-            if self.use_atr_stop:
-                # 用持仓股票的 ATR 动态计算止损价
-                daily = self.store.get_daily(pos.code, today, days=120)
-                atr_val = self._calc_atr(daily)
-                if atr_val > 0:
-                    atr_stop_pct = -self.atr_mult * atr_val / pos.entry_price
-                    # ATR止损和固定止损取更宽松的那个（允许更大波动）
-                    effective_stop = max(self.stop_loss, atr_stop_pct)
-                else:
-                    effective_stop = self.stop_loss
-            else:
-                effective_stop = self.stop_loss
+            # 2. 移动止盈：盈利超过 trail_mult*ATR 后，从最高点回撤 trail_back*ATR 就平仓
+            if self.use_atr_stop and atr > 0:
+                trail_trigger = self.atr_trail_mult * atr
+                if pos.highest_price - entry >= trail_trigger:
+                    trail_stop_price = pos.highest_price - self.atr_trail_back * atr
+                    if bar["low"] and bar["low"] <= trail_stop_price:
+                        exit_price = max(trail_stop_price, entry)
+                        self._close_position(pos, exit_price, today, "移动止盈")
+                        to_remove.append(pos)
+                        continue
 
-            if bar["low"] and bar["low"] / pos.entry_price - 1 <= effective_stop:
-                exit_price = pos.entry_price * (1 + effective_stop)
+            # 3. 止损
+            if bar["low"] and bar["low"] / entry - 1 <= -sl_pct:
+                exit_price = entry * (1 - sl_pct)
                 self._close_position(pos, exit_price, today, "止损")
                 to_remove.append(pos)
                 continue
 
+            # 4. 超时
             if pos.hold_days >= self.max_hold:
                 self._close_position(pos, bar["close"], today, "超时")
                 to_remove.append(pos)
                 continue
-
-            # 移动止盈：盈利 > 7% 后，止损提到成本价
-            if hasattr(self, 'trailing_stop') and self.trailing_stop > 0 and ret >= self.trailing_stop:
-                if bar["low"] and bar["low"] <= pos.entry_price:
-                    self._close_position(pos, pos.entry_price, today, "保本")
-                    to_remove.append(pos)
 
         for pos in to_remove:
             self.positions.remove(pos)
@@ -373,9 +482,20 @@ class BacktestEngine:
             # 距高点 < min_dist_high 不买（可选）
             if self.min_dist_high > 0 and ind["dist_high60"] < self.min_dist_high:
                 continue
+            # 需要 OHLC 给策略引擎
+            spot_open = row.get("open", 0) if hasattr(row, "get") and "open" in row.index else 0
+            spot_high = row.get("high", 0) if hasattr(row, "get") and "high" in row.index else 0
+            spot_low = row.get("low", 0) if hasattr(row, "get") and "low" in row.index else 0
+            spot_prev = row.get("prev_close", 0) if hasattr(row, "get") and "prev_close" in row.index else 0
+            spot_chg = row.get("change_percent", 0) if hasattr(row, "get") and "change_percent" in row.index else 0
             rows.append({
                 "stock_code": code,
                 "stock_name": row.get("stock_name", ""),
+                "open": spot_open,
+                "high": spot_high,
+                "low": spot_low,
+                "prev_close": spot_prev,
+                "change_percent": spot_chg,
                 "mf_ratio_5": mf_ratio_5,
                 **ind,
             })

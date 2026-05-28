@@ -2,6 +2,72 @@
 {% set nav = 'recs' %}
 {% block title %}历史推荐 · 股票推荐平台{% endblock %}
 
+{% block scripts %}
+{{ super() }}
+<script>
+// 全选/取消全选
+document.getElementById('select-all').addEventListener('change', function() {
+  document.querySelectorAll('.rec-checkbox').forEach(cb => cb.checked = this.checked);
+  updateDeleteButton();
+});
+
+// 单个复选框变化
+document.addEventListener('change', function(e) {
+  if (e.target.classList.contains('rec-checkbox')) {
+    updateDeleteButton();
+  }
+});
+
+function updateDeleteButton() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  const btn = document.getElementById('btn-delete-selected');
+  const count = document.getElementById('selected-count');
+  count.textContent = checked.length;
+  btn.classList.toggle('d-none', checked.length === 0);
+}
+
+async function deleteSelected() {
+  const checked = document.querySelectorAll('.rec-checkbox:checked');
+  if (checked.length === 0) return;
+  
+  if (!confirm(`确定要删除 ${checked.length} 条推荐记录吗？此操作不可撤销。`)) return;
+  
+  const ids = Array.from(checked).map(cb => cb.dataset.recId);
+  const btn = document.getElementById('btn-delete-selected');
+  const status = document.getElementById('delete-status');
+  btn.disabled = true;
+  status.textContent = '删除中…';
+  
+  try {
+    const r = await fetch('/api/recommendations/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ids: ids}),
+    });
+    const data = await r.json();
+    if (data.success) {
+      status.textContent = `已删除 ${data.deleted} 条`;
+      status.className = 'ms-2 small text-success';
+      // 移除已删除的行
+      checked.forEach(cb => {
+        const row = cb.closest('tr');
+        if (row) row.remove();
+      });
+      document.getElementById('select-all').checked = false;
+      updateDeleteButton();
+    } else {
+      throw new Error(data.error || '删除失败');
+    }
+  } catch(e) {
+    status.textContent = '错误: ' + e.message;
+    status.className = 'ms-2 small text-danger';
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}
+
 {% block content %}
 <h3 class="mb-3">历史推荐</h3>
 
@@ -30,10 +96,17 @@
 
 <div class="text-muted small mb-2">共 {{ items|length }} 条（最多展示 500 条）</div>
 
+<div class="mb-2">
+  <button id="btn-delete-selected" class="btn btn-sm btn-outline-danger d-none" onclick="deleteSelected()">
+    🗑 删除选中 (<span id="selected-count">0</span>)
+  </button>
+  <span id="delete-status" class="ms-2 small"></span>
+</div>
 <div class="table-responsive">
   <table class="table table-sm table-striped align-middle">
     <thead class="table-light">
       <tr>
+        <th class="text-center"><input type="checkbox" id="select-all" title="全选"></th>
         <th>推荐日</th>
         <th>代码</th>
         <th>名称</th>
@@ -52,6 +125,7 @@
     <tbody>
     {% for r in items %}
       <tr data-rec-id="{{ r.id }}" {% if r.is_watched %}class="table-warning"{% endif %}>
+        <td class="text-center"><input type="checkbox" class="rec-checkbox" data-rec-id="{{ r.id }}"></td>
         <td>{{ r.recommend_date }}</td>
         <td class="font-monospace">{{ r.stock_code }}</td>
         <td>{{ r.stock_name }}</td>
@@ -100,7 +174,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="13" class="text-center text-muted py-4">暂无数据</td></tr>
+      <tr><td colspan="14" class="text-center text-muted py-4">暂无数据</td></tr>
     {% endfor %}
     </tbody>
   </table>

@@ -28,10 +28,10 @@ logger = get_logger(__name__)
 
 _DAILY_FETCH_WORKERS = 12
 
-# ---- 硬过滤阈值（中长期稳健）----
+# ---- 硬过滤阈值（中长期稳健，与 run_select.py 保持一致）----
 MIN_FLOAT_MCAP = 5e9          # 流通市值 >= 50 亿
-MAX_RET_5 = 0.15              # 5 日累计涨幅 < 15%
-MAX_RET_20 = 0.40             # 20 日累计涨幅 < 40%
+MAX_RET_5 = 0.10              # 5 日累计涨幅 < 10%
+MAX_RET_20 = 0.30             # 20 日累计涨幅 < 30%
 MAX_VOL_STD = 0.04            # 20 日日收益率 std < 4%
 LIMIT_UP_MAIN = 0.095         # 主板涨停判定 9.5%
 LIMIT_UP_GROWTH = 0.195       # 创业板/科创板涨停判定 19.5%

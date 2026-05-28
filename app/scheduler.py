@@ -189,6 +189,35 @@ def run_daily_statistics(app, force: bool = False):
         return tracker.compute_statistics(today)
 
 
+
+def run_weekly_cleanup(app):
+    """每周一清理 30 天前的系统推荐。"""
+    from datetime import timedelta
+    today = date.today()
+    if today.weekday() != 0:
+        return 0
+    with app.app_context():
+        try:
+            cutoff = today - timedelta(days=30)
+            deleted = (
+                StockRecommendation.query
+                .filter(
+                    StockRecommendation.source == "system",
+                    StockRecommendation.recommend_date < cutoff,
+                    StockRecommendation.status == "active",
+                )
+                .delete(synchronize_session=False)
+            )
+            db.session.commit()
+            if deleted:
+                logger.info("每周清理: 删除 %d 条过期系统推荐 (%s 前)", deleted, cutoff.isoformat())
+            return deleted
+        except Exception as e:
+            db.session.rollback()
+            logger.warning("自动清理失败: %s", e)
+            return 0
+
+
 class TaskScheduler:
     def __init__(self, app):
         self.app = app

@@ -114,6 +114,7 @@ class PerformanceTracker:
                 history=history,
                 hold_days=hold_days,
                 is_initial=False,
+                entry_price=recommend_price,
             )
 
             perf = StockDailyPerformance(

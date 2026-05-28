@@ -3,17 +3,22 @@
 流程：
 1. 从腾讯拉全 A 股实时行情
 2. 初筛（去 ST、去涨停、流动性过滤）
-3. 从新浪拉日线做技术分析
-4. 硬过滤 + 五因子打分
-5. 输出 TOP 10
+3. 基本面过滤（ROE + PE）
+4. 从新浪拉日线做技术分析
+5. 硬过滤 + 多因子打分（含个股资金流、北向资金、股东人数）
+6. 输出 TOP 10
 """
 import os
 import sys
 import time
+from strategy_engine import StrategyEngine
 import math
 from datetime import date, datetime, timedelta
 from config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from data_providers.fundamental import FundamentalDataProvider
+from data_providers.capital_flow import CapitalFlowProvider
+from data_providers.shareholder import ShareholderDataProvider
 
 # ── 板块资金流（东方财富API）──
 
@@ -60,8 +65,11 @@ def fetch_tencent_spot_batch(codes: list[str], session: requests.Session) -> lis
                     "change_percent": float(parts[32]) if parts[32] else 0,
                     "turnover": float(parts[37]) * 10000 if parts[37] else 0,  # 万元 -> 元
                     "volume": float(parts[36]) * 100 if parts[36] else 0,  # 手 -> 股
+                    "open": float(parts[5]) if parts[5] else 0,
                     "high": float(parts[33]) if parts[33] else 0,
                     "low": float(parts[34]) if parts[34] else 0,
+                    "prev_close": float(parts[4]) if parts[4] else 0,
+                    "volume_ratio": float(parts[38]) if parts[38] else 0,
                     "total_market_cap": float(parts[45]) * 1e8 if len(parts) > 45 and parts[45] else 0,
                     "float_market_cap": float(parts[44]) * 1e8 if len(parts) > 44 and parts[44] else 0,
                 })
@@ -181,6 +189,36 @@ def compute_indicators(daily: pd.DataFrame):
     high60 = float(np.max(closes[-60:]))
     dist_high60 = (high60 - last) / high60 if high60 > 0 else 0.0
 
+    # 20日高点距离
+    high20 = float(np.max(closes[-20:]))
+    dist_high20 = (high20 - last) / high20 if high20 > 0 else 0.0
+    
+    # MA5/MA10 金叉检测（最近几天内是否有上穿）
+    ma5_cross_days = 99
+    if len(closes) >= 12:
+        ma5_arr = np.array([np.mean(closes[i-4:i+1]) if i >= 4 else np.mean(closes[:i+1]) for i in range(len(closes))])
+        ma10_arr = np.array([np.mean(closes[i-9:i+1]) if i >= 9 else np.mean(closes[:i+1]) for i in range(len(closes))])
+        for lookback in range(1, 6):  # 检查最近5天
+            idx = -1 - lookback
+            if abs(idx) <= len(ma5_arr) and abs(idx-1) <= len(ma5_arr):
+                if ma5_arr[idx] > ma10_arr[idx] and ma5_arr[idx-1] <= ma10_arr[idx-1]:
+                    ma5_cross_days = lookback
+                    break
+    
+    # MACD 金叉检测
+    ema12 = pd.Series(closes).ewm(span=12, adjust=False).mean().values
+    ema26 = pd.Series(closes).ewm(span=26, adjust=False).mean().values
+    dif = ema12 - ema26
+    dea = pd.Series(dif).ewm(span=9, adjust=False).mean().values
+    macd_golden = False
+    if len(dif) >= 3:
+        for lookback in range(1, 4):
+            idx = -1 - lookback
+            if abs(idx) < len(dif) and abs(idx-1) < len(dif):
+                if dif[idx] > dea[idx] and dif[idx-1] <= dea[idx-1]:
+                    macd_golden = True
+                    break
+    
     return {
         "last": last,
         "ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60,
@@ -190,6 +228,9 @@ def compute_indicators(daily: pd.DataFrame):
         "vol_ratio_5_20": vol_ratio,
         "avg_turnover_20": avg_turnover20,
         "dist_high60": dist_high60,
+        "dist_high20": dist_high20,
+        "ma5_cross_ma10_days": ma5_cross_days,
+        "macd_golden_cross": macd_golden,
     }
 
 
@@ -329,7 +370,9 @@ def get_sector_flow_bonus(stock_code, sector_flows, industry_map):
         return -7
     else:
         return -10
-def score_dataframe(factors: pd.DataFrame, history_freq: dict = None, sector_flows: dict = None, industry_map: dict = None) -> pd.DataFrame:
+def score_dataframe(factors: pd.DataFrame, history_freq: dict = None, sector_flows: dict = None,
+                    industry_map: dict = None, individual_flow_scores: dict = None,
+                    northbound_scores: dict = None, shareholder_scores: dict = None) -> pd.DataFrame:
     df = factors.copy()
 
     def zrank(s):
@@ -343,31 +386,63 @@ def score_dataframe(factors: pd.DataFrame, history_freq: dict = None, sector_flo
         score = 100 * (1 - over / half)
         return score.clip(lower=0, upper=100)
 
+    # ── 趋势强度 (W_TREND=20%) ──
     df["score_ret60"] = zrank(df["ret_60"])
     df["bias_ma20"] = (df["last"] / df["ma20"]) - 1
     df["score_bias"] = zrank(df["bias_ma20"])
-    df["trend_strength"] = df["score_ret60"] * 0.16 + df["score_bias"] * 0.09
+    df["trend_strength"] = df["score_ret60"] * 0.6 + df["score_bias"] * 0.4
 
+    # ── 趋势平滑 (W_SMOOTH=25%) ──
     df["score_smooth_std"] = zrank(-df["vol_std"])
     df["score_smooth_dd"] = zrank(df["max_dd"])
-    df["trend_smooth"] = df["score_smooth_std"] * 0.18 + df["score_smooth_dd"] * 0.12
+    df["trend_smooth"] = df["score_smooth_std"] * 0.6 + df["score_smooth_dd"] * 0.4
 
+    # ── 量能配合 (W_VOLUME=12%) ──
     df["score_vol"] = bell_score(df["vol_ratio_5_20"], 1.0, 2.0)
-    df["volume_factor"] = df["score_vol"] * 0.15
+    df["volume_factor"] = df["score_vol"]
 
+    # ── 位置因子 (W_POSITION=10%) ──
     df["score_pos"] = bell_score(df["dist_high60"], 0.05, 0.20)
-    df["position"] = df["score_pos"] * 0.12
+    df["position"] = df["score_pos"]
 
+    # ── 流动性 (W_LIQUIDITY=5%) ──
     df["score_liq"] = zrank(df["avg_turnover_20"])
-    df["liquidity"] = df["score_liq"] * 0.08
+    df["liquidity"] = df["score_liq"]
 
-    # 历史连续性因子（10%）：近7天出现次数越多，加分越高
+    # ── 历史连续性 (W_HISTORY=8%) ──
     if history_freq:
         df["history_count"] = df["stock_code"].map(history_freq).fillna(0).astype(int)
         df["history_score"] = (df["history_count"].clip(upper=3) / 3) * 100
     else:
         df["history_score"] = 0
-    df["history_factor"] = df["history_score"] * 0.10
+    df["history_factor"] = df["history_score"]
+
+    # ── 板块资金流 (W_SECTOR_FLOW=5%) ──
+    if sector_flows and industry_map:
+        df["sector_flow_bonus"] = df["stock_code"].apply(
+            lambda c: get_sector_flow_bonus(c, sector_flows, industry_map)
+        )
+    else:
+        df["sector_flow_bonus"] = 0
+    df["sector_flow_factor"] = (df["sector_flow_bonus"] + 10) / 20 * 100  # 归一化到 0-100
+
+    # ── 个股资金流 (W_INDIVIDUAL_FLOW=8%) ──
+    if individual_flow_scores:
+        df["individual_flow_score"] = df["stock_code"].map(individual_flow_scores).fillna(50)
+    else:
+        df["individual_flow_score"] = 50.0
+
+    # ── 北向资金 (W_NORTHBOUND=5%) ──
+    if northbound_scores:
+        df["northbound_score"] = df["stock_code"].map(northbound_scores).fillna(50)
+    else:
+        df["northbound_score"] = 50.0
+
+    # ── 股东人数加分 (0~10 bonus) ──
+    if shareholder_scores:
+        df["shareholder_bonus"] = df["stock_code"].map(shareholder_scores).fillna(0)
+    else:
+        df["shareholder_bonus"] = 0.0
 
     # ── 回撤惩罚：60日最大回撤 > 15% 扣分 ──
     df["dd_penalty"] = df["max_dd"].apply(lambda x: max(0, abs(x) - 0.15) * 200)
@@ -375,21 +450,53 @@ def score_dataframe(factors: pd.DataFrame, history_freq: dict = None, sector_flo
 
 
     # ── 板块资金流因子（5%）：优先资金流入板块 ──
-    if sector_flows and industry_map:
-        df["sector_flow_bonus"] = df["stock_code"].apply(
-            lambda c: get_sector_flow_bonus(c, sector_flows, industry_map)
-        )
-    else:
-        df["sector_flow_bonus"] = 0
-    df["sector_flow_factor"] = df["sector_flow_bonus"] * 0.50
+    # (已在上面处理)
+
+    # ── 多策略命中打分 ──
+    engine = StrategyEngine()
+    strategy_results = []
+    for _, row in df.iterrows():
+        stock_data = {
+            "close": row.get("current_price", 0),
+            "open": row.get("open", 0),
+            "high": row.get("high", 0),
+            "low": row.get("low", 0),
+            "prev_close": row.get("prev_close", 0),
+            "change_pct": row.get("change_percent", 0),
+            "ma5": row.get("ma5", 0),
+            "ma10": row.get("ma10", 0),
+            "ma20": row.get("ma20", 0),
+            "ma60": row.get("ma60", 0),
+            "ma20_slope": (row.get("ma20", 0) / row.get("ma60", 1) - 1) if row.get("ma60", 0) > 0 else 0,
+            "vol_ratio_5_20": row.get("vol_ratio_5_20", 1.0),
+            "volume_ratio": row.get("volume_ratio", 1.0),
+            "dist_from_high_60d": row.get("dist_high60", 0),
+            "dist_from_high_20d": row.get("dist_high20", row.get("dist_high60", 0)),
+            "ret_60": row.get("ret_60", 0),
+            "ret_5": row.get("ret_5", 0),
+            "ma5_cross_ma10_days": row.get("ma5_cross_ma10_days", 99),
+            "macd_golden_cross": row.get("macd_golden_cross", False),
+        }
+        result = engine.evaluate(stock_data)
+        strategy_results.append(result)
+
+    df["strategy_hit_count"] = [r["hit_count"] for r in strategy_results]
+    df["strategy_hits"] = [",".join(r["hit_strategies"]) if r["hit_strategies"] else "" for r in strategy_results]
+    df["strategy_bonus"] = [r["total_bonus"] for r in strategy_results]  # 权重由 Config.W_STRATEGY 控制
+
+    # ── 总分计算（使用 Config 权重） ──
     df["total_score"] = (
-        df["trend_strength"] * 0.8929 +
-        df["trend_smooth"] * 1.00 +
-        df["volume_factor"] * 1.00 +
-        df["position"] * 1.00 +
-        df["liquidity"] * 0.75 +
-        df["history_factor"] * 1.20 +
-        df["sector_flow_factor"] * 1.00 -
+        df["trend_strength"] * Config.W_TREND +
+        df["trend_smooth"] * Config.W_SMOOTH +
+        df["volume_factor"] * Config.W_VOLUME +
+        df["position"] * Config.W_POSITION +
+        df["liquidity"] * Config.W_LIQUIDITY +
+        df["history_factor"] * Config.W_HISTORY +
+        df["sector_flow_factor"] * Config.W_SECTOR_FLOW +
+        df["individual_flow_score"] * Config.W_INDIVIDUAL_FLOW +
+        df["northbound_score"] * Config.W_NORTHBOUND +
+        df["shareholder_bonus"] +
+        df["strategy_bonus"] * Config.W_STRATEGY -
         df["dd_penalty"]
     )
     return df
@@ -474,8 +581,39 @@ def main():
         print("  初筛后无候选，退出")
         sys.exit(0)
 
+    # 2.5) 基本面过滤（ROE + PE）
+    if Config.FUNDAMENTAL_FILTER:
+        print("\n[2.5/6] 基本面过滤...")
+        try:
+            fund_provider = FundamentalDataProvider()
+            pe_data = fund_provider.fetch_pe_batch()
+            roe_data = fund_provider.fetch_roe_batch()
+            # 需要行业映射来计算行业PE中位数
+            import sqlite3 as _sqlite3
+            _db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                    "backtest", "data", "market_data.db")
+            _industry_map_all = {}
+            try:
+                _conn = _sqlite3.connect(_db_path)
+                _cur = _conn.cursor()
+                _cur.execute("SELECT stock_code, industry FROM stock_info_new")
+                for _r in _cur.fetchall():
+                    _industry_map_all[_r[0]] = _r[1] or ""
+                _conn.close()
+            except Exception:
+                pass
+            industry_pe_median = fund_provider.get_industry_pe_median(pe_data, _industry_map_all)
+            before_count = len(df)
+            df = fund_provider.apply_fundamental_filter(
+                df, pe_data, roe_data, industry_pe_median, _industry_map_all,
+                min_roe=Config.MIN_ROE, pe_mult=Config.PE_MULT
+            )
+            print(f"  基本面过滤: {before_count} → {len(df)} 只（剔除 {before_count - len(df)} 只）")
+        except Exception as e:
+            print(f"  基本面过滤跳过（API失败）: {e}")
+
     # 3) 并发拉日线 + 硬过滤
-    print(f"\n[3/4] 并发拉日线 + 技术分析（12线程）...")
+    print(f"\n[3/6] 并发拉日线 + 技术分析（12线程）...")
     candidates = df.to_dict("records")
     rows = []
     rejected = {}
@@ -524,6 +662,14 @@ def main():
                 "turnover": rec["turnover"],
                 "float_market_cap": rec["float_market_cap"],
                 "change_percent": rec["change_percent"],
+                "open": rec.get("open", 0),
+                "high": rec.get("high", 0),
+                "low": rec.get("low", 0),
+                "prev_close": rec.get("prev_close", 0),
+                "volume_ratio": rec.get("volume_ratio", 0),
+                "dist_high20": ind.get("dist_high20", 0),
+                "ma5_cross_ma10_days": ind.get("ma5_cross_ma10_days", 99),
+                "macd_golden_cross": ind.get("macd_golden_cross", False),
                 **ind,
             })
             if done % 50 == 0:
@@ -559,16 +705,56 @@ def main():
     except Exception as e:
         print(f"  行业映射加载失败: {e}")
 
-    print(f"\n[4/4] 六因子+历史连续性打分...")
+    # ── 获取个股资金流 ──
+    print("\n[4/6] 获取个股资金流 + 北向资金 + 股东人数...")
+    capital_provider = CapitalFlowProvider()
+    individual_flow_scores = None
+    northbound_scores = None
+    shareholder_scores = None
+
+    try:
+        flow_data = capital_provider.fetch_individual_flow_batch()
+        individual_flow_scores = capital_provider.score_individual_flow(flow_data, codes)
+        print(f"  个股资金流: {len(flow_data)} 只数据")
+    except Exception as e:
+        print(f"  个股资金流获取失败（用缓存兜底）: {e}")
+
+    try:
+        nb_data = capital_provider.fetch_northbound_flow()
+        northbound_scores = capital_provider.score_northbound(nb_data, codes)
+        print(f"  北向资金: {len(nb_data)} 只数据")
+    except Exception as e:
+        print(f"  北向资金获取失败（用缓存兜底）: {e}")
+
+    try:
+        sh_provider = ShareholderDataProvider()
+        holder_data = sh_provider.fetch_shareholder_data()
+        shareholder_scores = sh_provider.compute_bonus(holder_data, codes)
+        print(f"  股东人数: {len(holder_data)} 只数据")
+    except Exception as e:
+        print(f"  股东人数获取失败（用缓存兜底）: {e}")
+
+    print(f"\n[5/6] 多因子打分（9因子+策略命中）...")
     history_freq = get_history_frequency(lookback_days=7)
     factors = pd.DataFrame(rows)
-    scored = score_dataframe(factors, history_freq, sector_flows, industry_map)
+    scored = score_dataframe(
+        factors, history_freq, sector_flows, industry_map,
+        individual_flow_scores=individual_flow_scores,
+        northbound_scores=northbound_scores,
+        shareholder_scores=shareholder_scores,
+    )
     scored = scored.sort_values("total_score", ascending=False)
     top = scored.head(Config.TOP_N_STOCKS)
 
     print(f"\n{'='*60}")
     print(f"  今日推荐 TOP {len(top)}")
     print(f"{'='*60}\n")
+
+    # 初始化信号生成器用于计算价格目标
+    from app.signal_generator import SignalGenerator
+    from app.data_fetcher import get_default_fetcher
+    sig_gen = SignalGenerator()
+    fetcher = get_default_fetcher()
 
     for i, (_, row) in enumerate(top.iterrows(), 1):
         code = row["stock_code"]
@@ -586,15 +772,39 @@ def main():
 
         hcnt = int(row.get("history_count", 0))
         htag = f"【连续{hcnt}次】" if hcnt >= 2 else (f"【首次推荐】" if hcnt == 1 else "")
-        print(f"  {i:2d}. [{code}] {name}  {htag}")
-        print(f"      现价 {price:.2f} ({chg:+.2f}%)  流通市值 {mcap:.0f}亿  综合分 {total:.1f}/100")
+        shit = row.get("strategy_hit_count", 0)
+        shits = row.get("strategy_hits", "")
+        stag = f" 命中{shit}策略" if shit > 0 else ""
+
+        # 新因子标签
+        flow_s = row.get("individual_flow_score", 50)
+        nb_s = row.get("northbound_score", 50)
+        sh_b = row.get("shareholder_bonus", 0)
+        flow_tag = "↑" if flow_s > 70 else ("↓" if flow_s < 30 else "→")
+        nb_tag = "↑" if nb_s > 70 else ("↓" if nb_s < 30 else "→")
+        sh_tag = f"+{sh_b:.0f}" if sh_b > 0 else ""
+
+        # 计算止盈止损价格
+        try:
+            history = fetcher.get_recent_daily(code, days=40)
+            targets = sig_gen.compute_price_targets(price, history)
+        except Exception:
+            targets = {}
+
+        print(f"  {i:2d}. [{code}] {name}  {htag}{stag}")
+        if shits:
+            print(f"      策略: {shits}")
+        print(f"      现价 {price:.2f} ({chg:+.2f}%)  流通市值 {mcap:.0f}亿  综合分 {total:.1f}")
         print(f"      60日涨 {r60:+.1f}% | 5日涨 {r5:+.1f}% | 波动率 {vs:.2f}% | 量比 {vr:.2f} | 回撤 {dd:.1f}% | 距高点 {dist:.1f}%")
+        print(f"      资金流{flow_tag} | 北向{nb_tag} | 股东{sh_tag}")
+        if targets:
+            print(f"      >>> 止损价 {targets['stop_loss_price']:.2f} (-{targets['stop_loss_pct']:.1f}%) | 止盈价 {targets['take_profit_price']:.2f} (+{targets['take_profit_pct']:.1f}%) | 移动止盈触发 {targets['trail_trigger_price']:.2f} (+{targets['trail_trigger_pct']:.1f}%)")
         print()
 
     print(f"{'='*60}")
     print("  策略: 中长期稳健趋势（持有10-30天）")
-    print("  选股逻辑: 均线多头 + 趋势平稳 + 温和放量 + 距高点5-15%")
-    print("  止盈 15% / 止损 -5% / 最长持有 30 天")
+    print("  选股逻辑: 均线多头 + 趋势平稳 + 温和放量 + 基本面过滤 + 资金流共振")
+    print("  止盈 ATR动态 / 止损 ATR动态 / 最长持有 30 天")
     print(f"{'='*60}")
 
     # ── 自动保存到数据库（供历史连续性因子使用）──
@@ -640,6 +850,8 @@ def _save_to_database(top: pd.DataFrame, top_n: int = 10):
                 "history_count": int(row.get("history_count", 0)),
                 "current_price": float(row["current_price"]),
                 "change_percent": float(row["change_percent"]) / 100,  # 统一存小数
+                "strategy_hit_count": int(row.get("strategy_hit_count", 0)),
+                "strategy_hits": str(row.get("strategy_hits", "")),
             }
             import json
             reason_json = json.dumps(reason, ensure_ascii=False)

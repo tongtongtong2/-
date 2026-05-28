@@ -1,0 +1,12 @@
+# 放量突破策略
+name: volume_breakout
+display_name: 放量突破
+description: 放量突破阻力位（20日高点/平台顶部），量比 > 2，强势收盘。
+category: trend
+weight: 0.7
+conditions:
+  resistance_break: "现价突破20日高点"
+  heavy_volume: "量比 > 2.0"
+  strong_close: "收盘在当日振幅上方30%"
+  not_overextended: "突破后乖离率 < 5%"
+score_bonus: 12

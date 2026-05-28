@@ -64,7 +64,8 @@
   <!-- Tab 导航 -->
   <ul class="nav nav-tabs mb-3" id="advisor-tabs" role="tablist">
     <li class="nav-item" role="presentation">
-      <button class="nav-link active" id="tab-long" data-bs-toggle="tab" data-bs-target="#panel-long" type="button">📊 长期总结</button>
+      <button class="nav-link active" id="tab-quick" data-bs-toggle="tab" data-bs-target="#panel-quick" type="button">🔍 快速体检</button>
+              <button class="nav-link" id="tab-long" data-bs-toggle="tab" data-bs-target="#panel-long" type="button">📊 长期总结</button>
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tab-short" data-bs-toggle="tab" data-bs-target="#panel-short" type="button">⚡ 短线分析</button>
@@ -79,7 +80,12 @@
 
   <div class="tab-content" id="advisor-panels">
     <!-- 长期总结 -->
-    <div class="tab-pane fade show active" id="panel-long">
+    <div class="tab-pane fade show active" id="panel-quick">
+            <div id="quick-content">
+              <div class="text-center text-muted py-4">输入代码后自动加载…</div>
+            </div>
+          </div>
+          <div class="tab-pane fade" id="panel-long">
       <div id="long-content"></div>
     </div>
     <!-- 短线分析 -->
@@ -111,6 +117,73 @@ function fmt(val) {
 // Tab loading indicator
 function setTabLoading(tabId) {
   $(tabId).innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>加载中...</div>';
+}
+
+// 渲染快速体检（来自 /api/analyze）
+function renderQuickCheck(data) {
+  if (!data || data.error) return `<div class="alert alert-warning">${data.error || '无数据'}</div>`;
+  
+  const d = data;
+  const cp = (d.change_percent || 0) * 100;
+  const cpCls = cp > 0 ? 'text-danger' : cp < 0 ? 'text-success' : '';
+  
+  // 结论卡片
+  let html = `<div class="card mb-3">
+    <div class="card-body">
+      <div class="row">
+        <div class="col-md-6">
+          <h5>${d.stock_code} ${d.stock_name || ''}</h5>
+          <div>现价 <b>${d.current_price?.toFixed(2) || '-'}</b>
+            <span class="${cpCls} ms-2">${cp >= 0 ? '+' : ''}${cp.toFixed(2)}%</span>
+          </div>
+        </div>
+        <div class="col-md-3 text-center">
+          <div class="text-muted small">综合分</div>
+          <div class="fs-3 fw-bold">${d.score?.total?.toFixed(1) || '-'}</div>
+        </div>
+        <div class="col-md-3 text-center">
+          <div class="text-muted small">结论</div>
+          <div class="fs-4 fw-bold">${d.verdict || '-'}</div>
+          <div class="small text-muted">${d.verdict_reason || ''}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  
+  // 体检表
+  html += '<div class="row"><div class="col-md-6"><div class="card"><div class="card-header"><b>硬过滤体检</b> ';
+  html += `<span class="text-muted small">${d.passed_count || 0}/${d.total_count || 0} 通过</span></div>`;
+  html += '<ul class="list-group list-group-flush">';
+  for (const c of (d.checks || [])) {
+    html += `<li class="list-group-item"><span class="${c.passed ? 'text-success' : 'text-danger'} fw-bold">${c.passed ? '✓' : '✗'}</span> ${c.name} <div class="small text-muted">${c.detail || ''}</div></li>`;
+  }
+  html += '</ul></div>';
+  
+  // 因子打分
+  html += '<div class="col-md-6"><div class="card"><div class="card-header"><b>因子打分</b></div><div class="card-body">';
+  const factors = [
+    ['趋势强度', d.score?.trend_strength || 0, 30],
+    ['趋势平滑', d.score?.trend_smooth || 0, 25],
+    ['量能配合', d.score?.volume_factor || 0, 20],
+    ['位置因子', d.score?.position || 0, 15],
+    ['流动性', d.score?.liquidity || 0, 10],
+  ];
+  for (const [name, v, max] of factors) {
+    const pct = Math.min((v / max) * 100, 100);
+    html += `<div class="mb-2"><div class="d-flex justify-content-between small"><span>${name}</span><span class="text-muted">${v.toFixed(1)}/${max}</span></div><div class="progress" style="height:8px"><div class="progress-bar" style="width:${pct}%"></div></div></div>`;
+  }
+  html += '</div></div></div></div>';
+  
+  // 风险提示
+  if (d.warnings && d.warnings.length) {
+    html += '<div class="card mt-3 border-warning"><div class="card-header bg-warning-subtle"><b>⚠ 风险提示</b></div><ul class="list-group list-group-flush">';
+    for (const w of d.warnings) {
+      html += `<li class="list-group-item">${w}</li>`;
+    }
+    html += '</ul></div>';
+  }
+  
+  return html;
 }
 
 // 渲染长期总结
@@ -342,9 +415,9 @@ function renderPattern(data) {
 
 // 分析流程
 async function runAnalysis(code) {
-  $('loading').classList.remove('d-none');
-  $('results').classList.add('d-none');
-  $('error-box').classList.add('d-none');
+  document.getElementById('loading').classList.remove('d-none');
+  document.getElementById('results').classList.add('d-none');
+  document.getElementById('error-box').classList.add('d-none');
 
   try {
     const endpoints = {
@@ -368,18 +441,19 @@ async function runAnalysis(code) {
       .map(r => r.data.current_price);
     const price = prices.length > 0 ? prices[0] : '-';
 
-    $('r-code').textContent = code;
-    $('r-name').textContent = '';
-    $('r-time').textContent = new Date().toLocaleString('zh-CN');
-    $('r-price').textContent = price !== '-' ? price.toFixed(2) : '-';
+    document.getElementById('r-code').textContent = code;
+    document.getElementById('r-name').textContent = '';
+    document.getElementById('r-time').textContent = new Date().toLocaleString('zh-CN');
+    document.getElementById('r-price').textContent = price !== '-' ? price.toFixed(2) : '-';
 
     // 渲染各 Tab
-    $('long-content').innerHTML = longR.success ? renderLongTerm(longR.data) : `<div class="alert alert-danger">${longR.error}</div>`;
-    $('short-content').innerHTML = shortR.success ? renderShortTerm(shortR.data) : `<div class="alert alert-danger">${shortR.error}</div>`;
-    $('bs-content').innerHTML = bsR.success ? renderBuySell(bsR.data) : `<div class="alert alert-danger">${bsR.error}</div>`;
-    $('pattern-content').innerHTML = patternR.success ? renderPattern(patternR.data) : `<div class="alert alert-danger">${patternR.error}</div>`;
+    document.getElementById('quick-content').innerHTML = quickR.success ? renderQuickCheck(quickR) : `<div class="alert alert-danger">${quickR.error || '分析失败'}</div>`;
+            document.getElementById('long-content').innerHTML = longR.success ? renderLongTerm(longR.data) : `<div class="alert alert-danger">${longR.error}</div>`;
+    document.getElementById('short-content').innerHTML = shortR.success ? renderShortTerm(shortR.data) : `<div class="alert alert-danger">${shortR.error}</div>`;
+    document.getElementById('bs-content').innerHTML = bsR.success ? renderBuySell(bsR.data) : `<div class="alert alert-danger">${bsR.error}</div>`;
+    document.getElementById('pattern-content').innerHTML = patternR.success ? renderPattern(patternR.data) : `<div class="alert alert-danger">${patternR.error}</div>`;
 
-    $('results').classList.remove('d-none');
+    document.getElementById('results').classList.remove('d-none');
 
     // 切换到第一个 tab
     const tabLong = document.getElementById('tab-long');
@@ -388,17 +462,17 @@ async function runAnalysis(code) {
     }
 
   } catch (e) {
-    $('error-box').textContent = '分析出错: ' + e.message;
-    $('error-box').classList.remove('d-none');
+    document.getElementById('error-box').textContent = '分析出错: ' + e.message;
+    document.getElementById('error-box').classList.remove('d-none');
   } finally {
-    $('loading').classList.add('d-none');
+    document.getElementById('loading').classList.add('d-none');
   }
 }
 
 // 表单提交
-$('advisor-form').addEventListener('submit', e => {
+document.getElementById('advisor-form').addEventListener('submit', e => {
   e.preventDefault();
-  const code = $('stock-code').value.trim();
+  const code = document.getElementById('stock-code').value.trim();
   if (!/^\d{6}$/.test(code)) {
     alert('请输入6位数字股票代码');
     return;
@@ -407,10 +481,10 @@ $('advisor-form').addEventListener('submit', e => {
 });
 
 // 支持回车提交
-$('stock-code').addEventListener('keydown', e => {
+document.getElementById('stock-code').addEventListener('keydown', e => {
   if (e.key === 'Enter') {
     e.preventDefault();
-    $('advisor-form').dispatchEvent(new Event('submit'));
+    document.getElementById('advisor-form').dispatchEvent(new Event('submit'));
   }
 });
 </script>

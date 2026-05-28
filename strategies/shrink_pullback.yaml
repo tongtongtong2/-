@@ -1,0 +1,15 @@
+# 缩量回踩策略
+# 多头排列中，价格回踩均线支撑 + 缩量企稳 → 低吸买点
+name: shrink_pullback
+display_name: 缩量回踩
+description: 价格回踩MA5/MA10 + 缩量 < 70%均量 + 企稳信号。趋势延续中的理想低吸点。
+category: trend
+weight: 1.2
+conditions:
+  ma_bullish: "MA5 > MA10 > MA20"
+  near_support: "价格距MA5 < 2% 或 距MA10 < 3%"
+  shrinking_volume: "近5日均量 < 近20日均量的70%"
+  stabilization: "今日收阳 或 下影线 > 50%"
+buy_zone: "MA5 ~ MA10 之间"
+stop_loss: "MA20 下方2%"
+score_bonus: 15

@@ -72,6 +72,32 @@ class Config:
     # 行情数据源：auto = 先试东方财富再回落新浪；sina = 直接走新浪，跳过东方财富探测
     SPOT_SOURCE = os.getenv('SPOT_SOURCE', 'auto').lower()
 
+    # ─── 基本面过滤 ───
+    FUNDAMENTAL_FILTER = os.getenv('FUNDAMENTAL_FILTER', 'True').lower() in ('true', '1', 'yes')
+    MIN_ROE = float(os.getenv('MIN_ROE', '8.0'))
+    PE_MULT = float(os.getenv('PE_MULT', '1.5'))  # PE > 行业中位数 * PE_MULT 则剔除
+
+    # ─── ATR 动态止损 ───
+    USE_ATR_STOP = os.getenv('USE_ATR_STOP', 'True').lower() in ('true', '1', 'yes')
+    ATR_MULT = float(os.getenv('ATR_MULT', '2.0'))
+    TRAILING_ATR_MULT = float(os.getenv('TRAILING_ATR_MULT', '1.0'))
+
+    # ─── 因子权重（总和约 98%，加上 bonus/penalty 可超 100） ───
+    W_TREND = float(os.getenv('W_TREND', '0.20'))
+    W_SMOOTH = float(os.getenv('W_SMOOTH', '0.25'))
+    W_VOLUME = float(os.getenv('W_VOLUME', '0.12'))
+    W_POSITION = float(os.getenv('W_POSITION', '0.10'))
+    W_LIQUIDITY = float(os.getenv('W_LIQUIDITY', '0.05'))
+    W_HISTORY = float(os.getenv('W_HISTORY', '0.08'))
+    W_SECTOR_FLOW = float(os.getenv('W_SECTOR_FLOW', '0.05'))
+    W_INDIVIDUAL_FLOW = float(os.getenv('W_INDIVIDUAL_FLOW', '0.08'))
+    W_NORTHBOUND = float(os.getenv('W_NORTHBOUND', '0.05'))
+    W_STRATEGY = float(os.getenv('W_STRATEGY', '0.10'))
+
+    # ─── ML 评分（LightGBM） ───
+    USE_ML_SCORING = os.getenv('USE_ML_SCORING', 'False').lower() in ('true', '1', 'yes')
+    ML_MODEL_PATH = os.getenv('ML_MODEL_PATH', 'models/lgbm_ranker.pkl')
+
     # Logging Configuration
     LOG_DIR = os.getenv('LOG_DIR', 'logs')
     LOG_FILE = os.getenv('LOG_FILE', 'app.log')

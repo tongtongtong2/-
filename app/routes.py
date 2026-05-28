@@ -420,8 +420,9 @@ def statistics():
 
 @bp.route("/analyze")
 def analyze():
-    """单股分析页（输入代码 → AJAX 调 /api/analyze/<code>）。"""
-    return render_template("analyze.html")
+    """已合并到投资顾问页。"""
+    from flask import redirect, url_for
+    return redirect(url_for("main.advisor"))
 
 
 # ----------------------------------------------------------------------
@@ -462,6 +463,52 @@ def api_trigger_selection():
     except Exception as exc:  # noqa: BLE001
         logger.exception("手动选股失败")
         return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@bp.route("/api/recommendations/delete", methods=["POST"])
+def api_delete_recommendations():
+    """批量删除推荐记录（勾选删除）。"""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids", [])
+    if not ids or not isinstance(ids, list):
+        return jsonify({"success": False, "error": "请提供要删除的ID列表"}), 400
+    
+    try:
+        deleted = (
+            StockRecommendation.query
+            .filter(StockRecommendation.id.in_(ids))
+            .delete(synchronize_session=False)
+        )
+        db.session.commit()
+        logger.info("手动删除 %d 条推荐记录", deleted)
+        return jsonify({"success": True, "deleted": deleted})
+    except Exception as e:
+        db.session.rollback()
+        logger.error("批量删除失败: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@bp.route("/api/recommendations/cleanup", methods=["POST"])
+def api_cleanup_old_recommendations():
+    """清理 30 天前的系统推荐（自动+手动触发）。"""
+    from datetime import timedelta
+    cutoff = date.today() - timedelta(days=30)
+    try:
+        deleted = (
+            StockRecommendation.query
+            .filter(
+                StockRecommendation.source == "system",
+                StockRecommendation.recommend_date < cutoff,
+                StockRecommendation.status == "active",
+            )
+            .delete(synchronize_session=False)
+        )
+        db.session.commit()
+        logger.info("自动清理 %d 条过期系统推荐（%s 之前）", deleted, cutoff.isoformat())
+        return jsonify({"success": True, "deleted": deleted, "cutoff": cutoff.isoformat()})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @bp.route("/api/trigger_update", methods=["POST"])

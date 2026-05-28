@@ -156,3 +156,8 @@ venv/
 # Backtest results (generated data)
 backtest/results/
 backtest/backtest/results/
+
+# Temporary wrappers and grid search
+_wrapper*.py
+grid_search.py
+.venv/

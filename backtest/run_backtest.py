@@ -31,7 +31,10 @@ def main():
     parser.add_argument("--min-dist", type=float, default=0, help="距60日高点低于此值不买(小数,如0.05)")
     parser.add_argument("--no-market-filter", action="store_true", help="关闭市场环境过滤")
     parser.add_argument("--no-atr-stop", action="store_true", help="关闭ATR动态止损，用固定止损")
-    parser.add_argument("--atr-mult", type=float, default=2.0, help="ATR止损倍数")
+    parser.add_argument("--atr-mult", type=float, default=1.5, help="ATR止损倍数")
+    parser.add_argument("--atr-tp-mult", type=float, default=4.0, help="ATR止盈倍数")
+    parser.add_argument("--atr-trail-mult", type=float, default=2.0, help="移动止盈触发倍数")
+    parser.add_argument("--atr-trail-back", type=float, default=1.0, help="移动止盈回撤倍数")
     parser.add_argument("--max-per-sector", type=int, default=2, help="同板块最大持仓数")
     args = parser.parse_args()
 
@@ -57,7 +60,7 @@ def main():
     print(f"    每日选股: {args.top_n} 只")
     print(f"    最大持仓: {args.max_positions} 只")
     print(f"    市场过滤: {'开' if not args.no_market_filter else '关'}（仅在沪深300>MA60时开仓）")
-    print(f"    ATR止损: {'开' if not args.no_atr_stop else '关'}（ATR×{args.atr_mult}）")
+    print(f"    ATR止损: {'开' if not args.no_atr_stop else '关'}（SL={args.atr_mult}x, TP={args.atr_tp_mult}x, Trail={args.atr_trail_mult}x/{args.atr_trail_back}x）")
     print(f"    板块上限: {args.max_per_sector} 只/板块")
     print()
 
@@ -73,6 +76,9 @@ def main():
         use_market_filter=not args.no_market_filter,
         use_atr_stop=not args.no_atr_stop,
         atr_mult=args.atr_mult,
+        atr_tp_mult=args.atr_tp_mult,
+        atr_trail_mult=args.atr_trail_mult,
+        atr_trail_back=args.atr_trail_back,
         max_per_sector=args.max_per_sector,
     )
 
