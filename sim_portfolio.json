@@ -1,20 +1,19 @@
 {
   "start_date": "2026-06-02",
-  "end_date": "2026-06-06",
-  "initial_capital": 50000,
+  "initial_capital": 200000,
   "strategy": "V6",
   "status": "running",
   "market_state": "牛市",
   "max_positions": 5,
-  "slot_size": 10000,
+  "slot_size": 40000,
   "positions": [
     {
       "code": "603075",
       "name": "热威股份",
       "buy_date": "2026-06-02",
       "buy_price": 28.17,
-      "shares": 300,
-      "cost": 8451,
+      "shares": 1400,
+      "cost": 39438,
       "stop_loss": 26.2,
       "trail_activate": 30.42,
       "trail_active": false,
@@ -34,31 +33,32 @@
       "code": "603075",
       "name": "热威股份",
       "price": 28.17,
-      "shares": 300,
-      "amount": 8451
+      "shares": 1400,
+      "amount": 39438
     },
     {
       "date": "2026-06-03",
       "action": "待选",
-      "note": "收盘前跑V6取TOP1"
+      "note": "跑V6选TOP1，买4万"
     },
     {
       "date": "2026-06-04",
       "action": "待选",
-      "note": "收盘前跑V6取TOP1"
+      "note": "跑V6选TOP1，买4万"
     },
     {
       "date": "2026-06-05",
       "action": "待选",
-      "note": "收盘前跑V6取TOP1"
+      "note": "跑V6选TOP1，买4万"
     },
     {
       "date": "2026-06-06",
       "action": "待选",
-      "note": "收盘前跑V6取TOP1"
+      "note": "跑V6选TOP1，买4万"
     }
   ],
+  "user_trades": [],
   "closed_trades": [],
   "daily_log": [],
-  "notes": "每天1万×5天=5万模拟盘。严格V6执行，收集真实数据对比用户实盘。"
+  "notes": "模拟盘20万严格V6（每只4万×5只）。用户每天1万实盘跟着看，保本金。"
 }
