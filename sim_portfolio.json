@@ -1,19 +1,19 @@
 {
   "start_date": "2026-06-02",
-  "initial_capital": 10000,
+  "initial_capital": 200000,
   "strategy": "V6",
   "status": "running",
   "market_state": "牛市",
   "max_positions": 5,
-  "slot_size": 2000,
+  "slot_size": 40000,
   "positions": [
     {
       "code": "603075",
       "name": "热威股份",
       "buy_date": "2026-06-02",
       "buy_price": 28.17,
-      "shares": 100,
-      "cost": 2817,
+      "shares": 1400,
+      "cost": 39438,
       "stop_loss": 26.2,
       "trail_activate": 30.42,
       "trail_active": false,
@@ -26,7 +26,25 @@
       "pnl": null
     }
   ],
+  "pending_buys": [
+    {
+      "date": "2026-06-03",
+      "note": "周二选股买第2只"
+    },
+    {
+      "date": "2026-06-04",
+      "note": "周三选股买第3只"
+    },
+    {
+      "date": "2026-06-05",
+      "note": "周四选股买第4只"
+    },
+    {
+      "date": "2026-06-06",
+      "note": "周五选股买第5只"
+    }
+  ],
   "closed_trades": [],
   "daily_log": [],
-  "notes": "1万本金模拟盘，验证V6策略真实表现。每天收盘后更新数据。"
+  "notes": "20万本金模拟盘，严格V6策略执行。每天收盘后更新，周二~周五每天跑V6选股补1只。"
 }
