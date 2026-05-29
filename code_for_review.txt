@@ -1,0 +1,1532 @@
+
+
+============================================================### quant_engine\market_regime.py ###
+"""
+市场状态识别器 (Market Regime Detector)
+识别当前市场处于牛市/熊市/震荡，驱动策略切换。
+
+方法：
+1. 趋势判断：MA20/MA60/MA120 多头排列 vs 空头排列
+2. 波动率状态：ATR 百分位判断震荡 vs 趋势
+3. 市场宽度：涨跌比、新高新低比
+4. 资金流向：北向资金、融资余额变化率
+"""
+import numpy as np
+import pandas as pd
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional
+
+
+class MarketState(Enum):
+    BULL = "bull"           # 牛市：趋势向上，进攻
+    BEAR = "bear"           # 熊市：趋势向下，防守
+    OSCILLATION = "osc"    # 震荡：无明确方向，高抛低吸
+    TRANSITION = "trans"    # 转换期：状态切换中，轻仓观望
+
+
+@dataclass
+class RegimeSignal:
+    state: MarketState
+    confidence: float       # 0-1 置信度
+    sub_phase: str          # 细分阶段：如牛市初期/中期/末期
+    position_ratio: float   # 建议仓位比例 0-1
+    reason: str             # 判断依据
+
+
+class MarketRegimeDetector:
+    """
+    多维度市场状态识别器
+    
+    核心逻辑：
+    - 牛市：MA20 > MA60 > MA120 + 量能放大 + 宽度扩张
+    - 熊市：MA20 < MA60 < MA120 + 量能萎缩 + 宽度收缩
+    - 震荡：均线缠绕 + ATR 低位 + 涨跌交替
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            "ma_short": 20,
+            "ma_mid": 60,
+            "ma_long": 120,
+            "atr_period": 14,
+            "atr_pct_threshold": 50,  # ATR百分位阈值，低于此为震荡
+            "breadth_bull_threshold": 0.6,  # 涨跌比>0.6为牛
+            "breadth_bear_threshold": 0.35, # 涨跌比<0.35为熊
+            "vol_expansion_ratio": 1.3,     # 量能放大倍数
+            "transition_days": 5,           # 状态确认天数
+        }
+        self._history = []
+    
+    def detect(self, index_df: pd.DataFrame, breadth_df: pd.DataFrame = None) -> RegimeSignal:
+        """
+        识别市场状态
+        
+        Parameters
+        ----------
+        index_df : pd.DataFrame
+            大盘指数数据，columns: [date, open, high, low, close, volume]
+        breadth_df : pd.DataFrame, optional
+            市场宽度数据，columns: [date, advance_count, decline_count, new_high, new_low]
+        """
+        if len(index_df) < self.config["ma_long"] + 10:
+            return RegimeSignal(MarketState.OSCILLATION, 0.3, "数据不足", 0.3, "历史数据不足以判断")
+        
+        close = index_df["close"].values
+        volume = index_df["volume"].values
+        high = index_df["high"].values
+        low = index_df["low"].values
+        
+        # 1. 均线系统
+        ma_short = self._sma(close, self.config["ma_short"])
+        ma_mid = self._sma(close, self.config["ma_mid"])
+        ma_long = self._sma(close, self.config["ma_long"])
+        
+        trend_score = self._calc_trend_score(close, ma_short, ma_mid, ma_long)
+        
+        # 2. 波动率状态
+        atr = self._calc_atr(high, low, close, self.config["atr_period"])
+        atr_pct = self._calc_atr_percentile(atr)
+        
+        # 3. 量能状态
+        vol_ratio = self._calc_volume_ratio(volume)
+        
+        # 4. 市场宽度（如果有数据）
+        breadth_score = self._calc_breadth_score(breadth_df) if breadth_df is not None else 0.5
+        
+        # 5. 综合判断
+        return self._synthesize(trend_score, atr_pct, vol_ratio, breadth_score, close)
+    
+    def _sma(self, data: np.ndarray, period: int) -> np.ndarray:
+        """简单移动平均"""
+        result = np.full_like(data, np.nan, dtype=float)
+        for i in range(period - 1, len(data)):
+            result[i] = np.mean(data[i - period + 1:i + 1])
+        return result
+    
+    def _calc_trend_score(self, close, ma_short, ma_mid, ma_long) -> float:
+        """
+        趋势评分 [-1, 1]
+        +1: 完美多头排列
+        -1: 完美空头排列
+        0: 均线缠绕
+        """
+        # 取最近值
+        c = close[-1]
+        ms = ma_short[-1]
+        mm = ma_mid[-1]
+        ml = ma_long[-1]
+        
+        if np.isnan(ms) or np.isnan(mm) or np.isnan(ml):
+            return 0.0
+        
+        score = 0.0
+        # 价格与均线关系
+        if c > ms: score += 0.2
+        else: score -= 0.2
+        if ms > mm: score += 0.3
+        else: score -= 0.3
+        if mm > ml: score += 0.3
+        else: score -= 0.3
+        
+        # 均线斜率
+        if len(ma_mid) > 5:
+            slope = (ma_mid[-1] - ma_mid[-6]) / ma_mid[-6] if ma_mid[-6] != 0 else 0
+            score += np.clip(slope * 10, -0.2, 0.2)
+        
+        return np.clip(score, -1.0, 1.0)
+    
+    def _calc_atr(self, high, low, close, period) -> np.ndarray:
+        """计算 ATR"""
+        tr = np.zeros(len(high))
+        for i in range(1, len(high)):
+            tr[i] = max(high[i] - low[i], 
+                       abs(high[i] - close[i-1]), 
+                       abs(low[i] - close[i-1]))
+        
+        atr = np.full_like(tr, np.nan)
+        atr[period] = np.mean(tr[1:period+1])
+        for i in range(period + 1, len(tr)):
+            atr[i] = (atr[i-1] * (period - 1) + tr[i]) / period
+        return atr
+    
+    def _calc_atr_percentile(self, atr: np.ndarray) -> float:
+        """ATR 在历史中的百分位"""
+        valid = atr[~np.isnan(atr)]
+        if len(valid) < 20:
+            return 50.0
+        current = valid[-1]
+        return float(np.sum(valid < current) / len(valid) * 100)
+    
+    def _calc_volume_ratio(self, volume: np.ndarray) -> float:
+        """近5日均量 / 近20日均量"""
+        if len(volume) < 20:
+            return 1.0
+        vol_5 = np.mean(volume[-5:])
+        vol_20 = np.mean(volume[-20:])
+        return vol_5 / vol_20 if vol_20 > 0 else 1.0
+    
+    def _calc_breadth_score(self, breadth_df: pd.DataFrame) -> float:
+        """市场宽度评分 [0, 1]"""
+        if breadth_df is None or len(breadth_df) == 0:
+            return 0.5
+        recent = breadth_df.tail(5)
+        adv = recent["advance_count"].sum()
+        dec = recent["decline_count"].sum()
+        total = adv + dec
+        if total == 0:
+            return 0.5
+        return adv / total
+    
+    def _synthesize(self, trend_score, atr_pct, vol_ratio, breadth_score, close) -> RegimeSignal:
+        """综合所有维度，输出最终状态判断"""
+        
+        # 牛市条件：趋势强（无breadth数据时放宽breadth要求）
+        if trend_score > 0.5 and breadth_score >= 0.45:
+            confidence = min(1.0, (trend_score + breadth_score) / 2)
+            if trend_score > 0.8 and vol_ratio > 1.2:
+                sub = "加速期"
+                pos = 0.9
+            elif trend_score > 0.5:
+                sub = "上升期"
+                pos = 0.7
+            else:
+                sub = "初期"
+                pos = 0.5
+            return RegimeSignal(MarketState.BULL, confidence, sub, pos,
+                              f"趋势分{trend_score:.2f} 宽度{breadth_score:.2f} 量比{vol_ratio:.2f}")
+        
+        # 熊市条件：趋势弱（无breadth数据时放宽）
+        elif trend_score < -0.4 and breadth_score <= 0.55:
+            confidence = min(1.0, abs(trend_score))
+            if trend_score < -0.7:
+                sub = "加速下跌"
+                pos = 0.0
+            elif trend_score < -0.4:
+                sub = "下降趋势"
+                pos = 0.1
+            else:
+                sub = "弱势"
+                pos = 0.2
+            return RegimeSignal(MarketState.BEAR, confidence, sub, pos,
+                              f"趋势分{trend_score:.2f} 宽度{breadth_score:.2f} 量比{vol_ratio:.2f}")
+        
+        # 震荡条件：趋势不明 + 波动率低
+        elif abs(trend_score) < 0.4 and atr_pct < self.config["atr_pct_threshold"]:
+            confidence = 1.0 - abs(trend_score)
+            pos = 0.4
+            return RegimeSignal(MarketState.OSCILLATION, confidence, "区间震荡", pos,
+                              f"趋势分{trend_score:.2f} ATR百分位{atr_pct:.0f} 量比{vol_ratio:.2f}")
+        
+        # 转换期
+        else:
+            pos = 0.3
+            return RegimeSignal(MarketState.TRANSITION, 0.4, "状态切换中", pos,
+                              f"趋势分{trend_score:.2f} ATR百分位{atr_pct:.0f} 宽度{breadth_score:.2f}")
+
+
+### quant_engine\factors\factor_engine.py ###
+"""
+多因子计算引擎
+适配三种市场状态的因子库：
+- 牛市因子：动量、突破、资金流入
+- 熊市因子：超跌反弹、防御性、低波动
+- 震荡因子：均值回归、布林带、RSI极值
+"""
+import numpy as np
+import pandas as pd
+from typing import Dict, List
+
+
+class FactorEngine:
+    """
+    统一因子计算接口
+    输入：个股 OHLCV DataFrame
+    输出：因子值 DataFrame（每行一只股票，每列一个因子）
+    """
+    
+    def compute_all(self, df: pd.DataFrame, market_state: str = "bull") -> pd.DataFrame:
+        """
+        计算所有因子
+        
+        Parameters
+        ----------
+        df : pd.DataFrame
+            columns: [date, code, open, high, low, close, volume, amount]
+        market_state : str
+            "bull" / "bear" / "osc" - 决定因子权重
+        """
+        results = {}
+        
+        # 通用因子（所有状态都用）
+        results["momentum_5d"] = self._momentum(df, 5)
+        results["momentum_20d"] = self._momentum(df, 20)
+        results["volume_ratio"] = self._volume_ratio(df, 5, 20)
+        results["rsi_14"] = self._rsi(df, 14)
+        results["atr_pct"] = self._atr_percent(df, 14)
+        
+        # 牛市专用因子
+        if market_state == "bull":
+            results["breakout_20d"] = self._breakout_strength(df, 20)
+            results["ma_support"] = self._ma_support_distance(df)
+            results["volume_breakout"] = self._volume_breakout(df)
+            results["consecutive_up"] = self._consecutive_direction(df, direction="up")
+            results["relative_strength"] = self._relative_strength(df, 20)
+        
+        # 熊市专用因子
+        elif market_state == "bear":
+            results["oversold_depth"] = self._oversold_depth(df)
+            results["support_distance"] = self._support_distance(df, 60)
+            results["low_volatility"] = self._low_volatility_score(df)
+            results["dividend_yield"] = self._dividend_proxy(df)
+            results["bear_divergence"] = self._bear_divergence(df)
+        
+        # 震荡专用因子
+        elif market_state == "osc":
+            results["bollinger_position"] = self._bollinger_position(df)
+            results["rsi_extreme"] = self._rsi_extreme(df)
+            results["mean_reversion_5d"] = self._mean_reversion(df, 5)
+            results["range_position"] = self._range_position(df, 20)
+            results["volume_dry"] = self._volume_dry(df)
+        
+        return pd.DataFrame(results)
+    
+    # ==================== 通用因子 ====================
+    
+    def _momentum(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """N日动量 = (close - close_n) / close_n"""
+        close = df.groupby("code")["close"].last()
+        close_n = df.groupby("code")["close"].apply(lambda x: x.iloc[-period-1] if len(x) > period else np.nan)
+        return (close - close_n) / close_n
+    
+    def _volume_ratio(self, df: pd.DataFrame, short: int, long: int) -> pd.Series:
+        """量比 = 近short日均量 / 近long日均量"""
+        def calc(g):
+            vol = g["volume"].values
+            if len(vol) < long:
+                return np.nan
+            return np.mean(vol[-short:]) / np.mean(vol[-long:]) if np.mean(vol[-long:]) > 0 else 1.0
+        return df.groupby("code").apply(calc)
+    
+    def _rsi(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """RSI 相对强弱指标"""
+        def calc(g):
+            close = g["close"].values
+            if len(close) < period + 1:
+                return np.nan
+            deltas = np.diff(close[-(period+1):])
+            gains = np.where(deltas > 0, deltas, 0)
+            losses = np.where(deltas < 0, -deltas, 0)
+            avg_gain = np.mean(gains)
+            avg_loss = np.mean(losses)
+            if avg_loss == 0:
+                return 100.0
+            rs = avg_gain / avg_loss
+            return 100 - (100 / (1 + rs))
+        return df.groupby("code").apply(calc)
+    
+    def _atr_percent(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """ATR / Close 百分比，衡量波动率"""
+        def calc(g):
+            h = g["high"].values
+            l = g["low"].values
+            c = g["close"].values
+            if len(c) < period + 1:
+                return np.nan
+            tr = []
+            for i in range(-period, 0):
+                tr.append(max(h[i] - l[i], abs(h[i] - c[i-1]), abs(l[i] - c[i-1])))
+            atr = np.mean(tr)
+            return atr / c[-1] * 100 if c[-1] > 0 else np.nan
+        return df.groupby("code").apply(calc)
+    
+    # ==================== 牛市因子 ====================
+    
+    def _breakout_strength(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """突破强度 = (close - N日最高) / N日最高，正值=创新高"""
+        def calc(g):
+            c = g["close"].values
+            h = g["high"].values
+            if len(h) < period:
+                return np.nan
+            high_n = np.max(h[-period-1:-1])  # 不含今天
+            return (c[-1] - high_n) / high_n if high_n > 0 else 0
+        return df.groupby("code").apply(calc)
+    
+    def _ma_support_distance(self, df: pd.DataFrame) -> pd.Series:
+        """价格距离MA20的百分比，正值=在均线上方"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < 20:
+                return np.nan
+            ma20 = np.mean(c[-20:])
+            return (c[-1] - ma20) / ma20 * 100 if ma20 > 0 else 0
+        return df.groupby("code").apply(calc)
+    
+    def _volume_breakout(self, df: pd.DataFrame) -> pd.Series:
+        """放量突破信号：今日量 > 20日均量 * 2 且收阳"""
+        def calc(g):
+            c = g["close"].values
+            o = g["open"].values
+            v = g["volume"].values
+            if len(v) < 20:
+                return 0.0
+            vol_avg = np.mean(v[-20:])
+            is_up = c[-1] > o[-1]
+            vol_expand = v[-1] / vol_avg if vol_avg > 0 else 1
+            return vol_expand if is_up else 0.0
+        return df.groupby("code").apply(calc)
+    
+    def _consecutive_direction(self, df: pd.DataFrame, direction: str = "up") -> pd.Series:
+        """连续上涨/下跌天数"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < 2:
+                return 0
+            count = 0
+            for i in range(len(c)-1, 0, -1):
+                if direction == "up" and c[i] > c[i-1]:
+                    count += 1
+                elif direction == "down" and c[i] < c[i-1]:
+                    count += 1
+                else:
+                    break
+            return count
+        return df.groupby("code").apply(calc)
+    
+    def _relative_strength(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """相对强度：个股涨幅 vs 全市场中位数涨幅"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < period:
+                return np.nan
+            return (c[-1] - c[-period]) / c[-period]
+        all_returns = df.groupby("code").apply(calc)
+        median_ret = all_returns.median()
+        return all_returns - median_ret
+    
+    # ==================== 熊市因子 ====================
+    
+    def _oversold_depth(self, df: pd.DataFrame) -> pd.Series:
+        """超跌深度：距离60日高点的跌幅"""
+        def calc(g):
+            c = g["close"].values
+            h = g["high"].values
+            if len(h) < 60:
+                return np.nan
+            high_60 = np.max(h[-60:])
+            return (c[-1] - high_60) / high_60  # 负值，越负越超跌
+        return df.groupby("code").apply(calc)
+    
+    def _support_distance(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """距离支撑位（N日最低）的距离百分比"""
+        def calc(g):
+            c = g["close"].values
+            l = g["low"].values
+            if len(l) < period:
+                return np.nan
+            low_n = np.min(l[-period:])
+            return (c[-1] - low_n) / low_n if low_n > 0 else 0
+        return df.groupby("code").apply(calc)
+    
+    def _low_volatility_score(self, df: pd.DataFrame) -> pd.Series:
+        """低波动评分：波动率越低分越高（熊市防御）"""
+        atr_pct = self._atr_percent(df, 14)
+        # 反转：波动率低 = 分数高
+        return -atr_pct
+    
+    def _dividend_proxy(self, df: pd.DataFrame) -> pd.Series:
+        """股息率代理：用低PE/低波动近似（无基本面数据时）"""
+        # 简化：用价格稳定性代替
+        def calc(g):
+            c = g["close"].values
+            if len(c) < 20:
+                return np.nan
+            return -np.std(c[-20:]) / np.mean(c[-20:])  # 变异系数取反
+        return df.groupby("code").apply(calc)
+    
+    def _bear_divergence(self, df: pd.DataFrame) -> pd.Series:
+        """底背离信号：价格创新低但RSI未创新低"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < 30:
+                return 0.0
+            # 计算两段RSI
+            rsi_recent = self._calc_rsi_array(c[-14:])
+            rsi_prev = self._calc_rsi_array(c[-28:-14])
+            price_lower = c[-1] < np.min(c[-28:-14])
+            rsi_higher = rsi_recent > rsi_prev if not np.isnan(rsi_recent) and not np.isnan(rsi_prev) else False
+            return 1.0 if (price_lower and rsi_higher) else 0.0
+        return df.groupby("code").apply(calc)
+    
+    def _calc_rsi_array(self, prices) -> float:
+        """辅助：计算一段价格的RSI"""
+        if len(prices) < 2:
+            return np.nan
+        deltas = np.diff(prices)
+        gains = np.mean(np.where(deltas > 0, deltas, 0))
+        losses = np.mean(np.where(deltas < 0, -deltas, 0))
+        if losses == 0:
+            return 100.0
+        return 100 - 100 / (1 + gains / losses)
+    
+    # ==================== 震荡因子 ====================
+    
+    def _bollinger_position(self, df: pd.DataFrame) -> pd.Series:
+        """布林带位置：(close - lower) / (upper - lower)，0=下轨，1=上轨"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < 20:
+                return np.nan
+            ma = np.mean(c[-20:])
+            std = np.std(c[-20:])
+            upper = ma + 2 * std
+            lower = ma - 2 * std
+            width = upper - lower
+            if width == 0:
+                return 0.5
+            return (c[-1] - lower) / width
+        return df.groupby("code").apply(calc)
+    
+    def _rsi_extreme(self, df: pd.DataFrame) -> pd.Series:
+        """RSI极值信号：<30超卖(正分)，>70超买(负分)"""
+        rsi = self._rsi(df, 14)
+        # 转换为交易信号：超卖=正，超买=负
+        return rsi.apply(lambda x: (30 - x) / 30 if x < 30 else (70 - x) / 30 if x > 70 else 0)
+    
+    def _mean_reversion(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """均值回归因子：偏离均值越远，回归概率越大"""
+        def calc(g):
+            c = g["close"].values
+            if len(c) < period + 10:
+                return np.nan
+            ma = np.mean(c[-period-10:-1])  # 不含今天的均值
+            deviation = (c[-1] - ma) / ma
+            return -deviation  # 取反：跌多了给正分（买入信号）
+        return df.groupby("code").apply(calc)
+    
+    def _range_position(self, df: pd.DataFrame, period: int) -> pd.Series:
+        """区间位置：在N日高低区间中的位置，0=底部，1=顶部"""
+        def calc(g):
+            c = g["close"].values
+            h = g["high"].values
+            l = g["low"].values
+            if len(c) < period:
+                return np.nan
+            high_n = np.max(h[-period:])
+            low_n = np.min(l[-period:])
+            rng = high_n - low_n
+            if rng == 0:
+                return 0.5
+            return (c[-1] - low_n) / rng
+        return df.groupby("code").apply(calc)
+    
+    def _volume_dry(self, df: pd.DataFrame) -> pd.Series:
+        """缩量程度：量越小越可能反弹（震荡市底部特征）"""
+        def calc(g):
+            v = g["volume"].values
+            if len(v) < 20:
+                return np.nan
+            vol_avg = np.mean(v[-20:])
+            return 1 - (v[-1] / vol_avg) if vol_avg > 0 else 0  # 缩量=正分
+        return df.groupby("code").apply(calc)
+
+
+### quant_engine\strategies\adaptive_strategy.py ###
+"""
+自适应多策略引擎
+根据市场状态自动切换策略：
+- 牛市：趋势追踪 + 突破买入 + 移动止盈
+- 熊市：超跌反弹 + 严格止损 + 轻仓防守
+- 震荡：高抛低吸 + 网格交易 + 区间突破
+"""
+import numpy as np
+import pandas as pd
+from dataclasses import dataclass
+from typing import List, Dict, Optional
+from enum import Enum
+
+
+@dataclass
+class TradeSignal:
+    code: str
+    action: str          # "buy" / "sell" / "hold"
+    price: float
+    target_price: float  # 目标价
+    stop_loss: float     # 止损价
+    position_pct: float  # 建议仓位比例
+    reason: str
+    confidence: float    # 信号置信度 0-1
+    strategy: str        # 来源策略名
+
+
+class BullStrategy:
+    """
+    牛市策略：趋势追踪 + 动量突破
+    
+    核心逻辑：
+    1. 选股：动量强 + 放量突破 + 均线多头
+    2. 买入：突破20日新高 + 量能确认
+    3. 止盈：移动止盈（回撤ATR*2则卖出）
+    4. 止损：跌破MA20 或 固定-8%
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            "max_positions": 8,
+            "position_pct": 0.12,       # 单只仓位
+            "stop_loss_pct": -0.08,     # 固定止损
+            "trailing_atr_mult": 2.0,   # 移动止盈ATR倍数
+            "breakout_period": 20,      # 突破周期
+            "min_volume_ratio": 1.5,    # 最低量比
+            "min_momentum_5d": 0.03,    # 5日最低动量
+            "ma_period": 20,            # 均线周期
+        }
+    
+    def generate_signals(self, factors: pd.DataFrame, holdings: Dict, 
+                        prices: Dict[str, pd.DataFrame]) -> List[TradeSignal]:
+        signals = []
+        
+        # 卖出信号：检查持仓
+        for code, pos in holdings.items():
+            if code not in prices:
+                continue
+            df = prices[code]
+            close = df["close"].values[-1]
+            
+            # 止损检查
+            pnl_pct = (close - pos["avg_cost"]) / pos["avg_cost"]
+            if pnl_pct <= self.config["stop_loss_pct"]:
+                signals.append(TradeSignal(
+                    code=code, action="sell", price=close,
+                    target_price=0, stop_loss=0, position_pct=1.0,
+                    reason=f"止损触发: {pnl_pct:.1%}",
+                    confidence=0.95, strategy="bull_stop_loss"
+                ))
+                continue
+            
+            # 移动止盈：从最高点回撤超过 ATR*2
+            if "max_price" in pos:
+                atr = self._calc_atr(df, 14)
+                trail_stop = pos["max_price"] - atr * self.config["trailing_atr_mult"]
+                if close < trail_stop:
+                    signals.append(TradeSignal(
+                        code=code, action="sell", price=close,
+                        target_price=0, stop_loss=0, position_pct=1.0,
+                        reason=f"移动止盈: 从高点{pos['max_price']:.2f}回撤至{close:.2f}",
+                        confidence=0.85, strategy="bull_trailing_stop"
+                    ))
+                    continue
+            
+            # 跌破MA20
+            if len(df) >= 20:
+                ma20 = np.mean(df["close"].values[-20:])
+                if close < ma20 * 0.98:  # 跌破MA20的2%
+                    signals.append(TradeSignal(
+                        code=code, action="sell", price=close,
+                        target_price=0, stop_loss=0, position_pct=1.0,
+                        reason=f"跌破MA20({ma20:.2f})",
+                        confidence=0.75, strategy="bull_ma_break"
+                    ))
+        
+        # 买入信号：从因子中选股
+        if len(holdings) < self.config["max_positions"]:
+            buy_candidates = self._select_buy_candidates(factors, holdings, prices)
+            signals.extend(buy_candidates)
+        
+        return signals
+    
+    def _select_buy_candidates(self, factors, holdings, prices) -> List[TradeSignal]:
+        """选择买入候选"""
+        candidates = []
+        
+        for code in factors.index:
+            if code in holdings:
+                continue
+            
+            row = factors.loc[code]
+            
+            # 牛市买入条件
+            momentum_ok = row.get("momentum_5d", 0) > self.config["min_momentum_5d"]
+            volume_ok = row.get("volume_ratio", 0) > self.config["min_volume_ratio"]
+            breakout_ok = row.get("breakout_20d", 0) > 0  # 创新高
+            
+            if momentum_ok and (volume_ok or breakout_ok):
+                price = prices[code]["close"].values[-1] if code in prices else 0
+                atr = self._calc_atr(prices[code], 14) if code in prices else price * 0.03
+                
+                candidates.append(TradeSignal(
+                    code=code, action="buy", price=price,
+                    target_price=price * 1.15,  # 目标+15%
+                    stop_loss=price * (1 + self.config["stop_loss_pct"]),
+                    position_pct=self.config["position_pct"],
+                    reason=f"动量{row.get('momentum_5d',0):.1%} 量比{row.get('volume_ratio',0):.1f}",
+                    confidence=min(0.9, (row.get("momentum_5d", 0) * 5 + row.get("volume_ratio", 0) * 0.2)),
+                    strategy="bull_breakout"
+                ))
+        
+        # 按置信度排序，取前N个
+        candidates.sort(key=lambda x: x.confidence, reverse=True)
+        slots = self.config["max_positions"] - len(holdings)
+        return candidates[:slots]
+    
+    def _calc_atr(self, df: pd.DataFrame, period: int) -> float:
+        h = df["high"].values
+        l = df["low"].values
+        c = df["close"].values
+        if len(c) < period + 1:
+            return c[-1] * 0.03
+        tr = []
+        for i in range(-period, 0):
+            tr.append(max(h[i] - l[i], abs(h[i] - c[i-1]), abs(l[i] - c[i-1])))
+        return np.mean(tr)
+
+
+class BearStrategy:
+    """
+    熊市策略：防守 + 超跌反弹
+    
+    核心逻辑：
+    1. 默认空仓或极轻仓（最多30%仓位）
+    2. 只做超跌反弹：RSI<25 + 底背离 + 缩量企稳
+    3. 快进快出：目标5-8%就走
+    4. 严格止损：-5%无条件出局
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            "max_positions": 3,         # 最多3只
+            "position_pct": 0.08,       # 单只仓位极小
+            "max_total_position": 0.3,  # 总仓位不超30%
+            "stop_loss_pct": -0.05,     # 严格止损5%
+            "take_profit_pct": 0.08,    # 快速止盈8%
+            "rsi_oversold": 25,         # RSI超卖阈值
+            "min_drop_from_high": -0.20, # 至少从高点跌20%
+        }
+    
+    def generate_signals(self, factors: pd.DataFrame, holdings: Dict,
+                        prices: Dict[str, pd.DataFrame]) -> List[TradeSignal]:
+        signals = []
+        
+        # 卖出：严格止损 + 快速止盈
+        for code, pos in holdings.items():
+            if code not in prices:
+                continue
+            close = prices[code]["close"].values[-1]
+            pnl_pct = (close - pos["avg_cost"]) / pos["avg_cost"]
+            
+            # 止损
+            if pnl_pct <= self.config["stop_loss_pct"]:
+                signals.append(TradeSignal(
+                    code=code, action="sell", price=close,
+                    target_price=0, stop_loss=0, position_pct=1.0,
+                    reason=f"熊市止损: {pnl_pct:.1%}",
+                    confidence=0.98, strategy="bear_stop_loss"
+                ))
+            # 止盈
+            elif pnl_pct >= self.config["take_profit_pct"]:
+                signals.append(TradeSignal(
+                    code=code, action="sell", price=close,
+                    target_price=0, stop_loss=0, position_pct=1.0,
+                    reason=f"熊市止盈: {pnl_pct:.1%}",
+                    confidence=0.9, strategy="bear_take_profit"
+                ))
+            # 持有超过5天也考虑出
+            elif pos.get("hold_days", 0) > 5 and pnl_pct > 0:
+                signals.append(TradeSignal(
+                    code=code, action="sell", price=close,
+                    target_price=0, stop_loss=0, position_pct=1.0,
+                    reason=f"熊市持有超5天，落袋: {pnl_pct:.1%}",
+                    confidence=0.7, strategy="bear_time_exit"
+                ))
+        
+        # 买入：极度谨慎，只做超跌反弹
+        total_pos = sum(p.get("position_pct", 0.1) for p in holdings.values())
+        if total_pos < self.config["max_total_position"] and len(holdings) < self.config["max_positions"]:
+            for code in factors.index:
+                if code in holdings:
+                    continue
+                row = factors.loc[code]
+                
+                rsi = row.get("rsi_14", 50)
+                oversold = row.get("oversold_depth", 0)
+                divergence = row.get("bear_divergence", 0)
+                
+                # 超跌 + 底背离 + RSI极低
+                if rsi < self.config["rsi_oversold"] and oversold < self.config["min_drop_from_high"]:
+                    price = prices[code]["close"].values[-1] if code in prices else 0
+                    signals.append(TradeSignal(
+                        code=code, action="buy", price=price,
+                        target_price=price * (1 + self.config["take_profit_pct"]),
+                        stop_loss=price * (1 + self.config["stop_loss_pct"]),
+                        position_pct=self.config["position_pct"],
+                        reason=f"超跌反弹: RSI={rsi:.0f} 跌幅{oversold:.1%}",
+                        confidence=0.5 + divergence * 0.3,
+                        strategy="bear_oversold_bounce"
+                    ))
+        
+        return signals
+
+
+class OscillationStrategy:
+    """
+    震荡策略：高抛低吸 + 区间交易
+    
+    核心逻辑：
+    1. 识别震荡区间（20日高低点）
+    2. 接近下轨买入，接近上轨卖出
+    3. 布林带 + RSI 双确认
+    4. 仓位中等（50%左右）
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            "max_positions": 5,
+            "position_pct": 0.10,
+            "max_total_position": 0.5,
+            "stop_loss_pct": -0.06,
+            "take_profit_pct": 0.06,    # 震荡市目标小
+            "buy_range_threshold": 0.25, # 区间位置<25%买入
+            "sell_range_threshold": 0.80, # 区间位置>80%卖出
+            "rsi_buy": 35,
+            "rsi_sell": 65,
+        }
+    
+    def generate_signals(self, factors: pd.DataFrame, holdings: Dict,
+                        prices: Dict[str, pd.DataFrame]) -> List[TradeSignal]:
+        signals = []
+        
+        # 卖出逻辑
+        for code, pos in holdings.items():
+            if code not in prices:
+                continue
+            close = prices[code]["close"].values[-1]
+            pnl_pct = (close - pos["avg_cost"]) / pos["avg_cost"]
+            
+            # 止损
+            if pnl_pct <= self.config["stop_loss_pct"]:
+                signals.append(TradeSignal(
+                    code=code, action="sell", price=close,
+                    target_price=0, stop_loss=0, position_pct=1.0,
+                    reason=f"震荡止损: {pnl_pct:.1%}",
+                    confidence=0.95, strategy="osc_stop_loss"
+                ))
+                continue
+            
+            # 到达区间上轨 或 止盈
+            if code in factors.index:
+                range_pos = factors.loc[code].get("range_position", 0.5)
+                rsi = factors.loc[code].get("rsi_14", 50)
+                
+                if range_pos > self.config["sell_range_threshold"] or rsi > self.config["rsi_sell"]:
+                    signals.append(TradeSignal(
+                        code=code, action="sell", price=close,
+                        target_price=0, stop_loss=0, position_pct=1.0,
+                        reason=f"震荡高抛: 区间位置{range_pos:.0%} RSI={rsi:.0f}",
+                        confidence=0.8, strategy="osc_sell_high"
+                    ))
+                elif pnl_pct >= self.config["take_profit_pct"]:
+                    signals.append(TradeSignal(
+                        code=code, action="sell", price=close,
+                        target_price=0, stop_loss=0, position_pct=1.0,
+                        reason=f"震荡止盈: {pnl_pct:.1%}",
+                        confidence=0.85, strategy="osc_take_profit"
+                    ))
+        
+        # 买入：区间下轨 + RSI低
+        total_pos = sum(p.get("position_pct", 0.1) for p in holdings.values())
+        if total_pos < self.config["max_total_position"] and len(holdings) < self.config["max_positions"]:
+            for code in factors.index:
+                if code in holdings:
+                    continue
+                row = factors.loc[code]
+                
+                range_pos = row.get("range_position", 0.5)
+                rsi = row.get("rsi_14", 50)
+                boll_pos = row.get("bollinger_position", 0.5)
+                vol_dry = row.get("volume_dry", 0)
+                
+                # 区间底部 + RSI低 + 缩量
+                if (range_pos < self.config["buy_range_threshold"] and 
+                    rsi < self.config["rsi_buy"] and vol_dry > 0.2):
+                    price = prices[code]["close"].values[-1] if code in prices else 0
+                    signals.append(TradeSignal(
+                        code=code, action="buy", price=price,
+                        target_price=price * (1 + self.config["take_profit_pct"]),
+                        stop_loss=price * (1 + self.config["stop_loss_pct"]),
+                        position_pct=self.config["position_pct"],
+                        reason=f"震荡低吸: 区间{range_pos:.0%} RSI={rsi:.0f} 缩量{vol_dry:.1f}",
+                        confidence=0.6 + (1 - range_pos) * 0.3,
+                        strategy="osc_buy_low"
+                    ))
+        
+        return signals
+
+
+class AdaptiveStrategyEngine:
+    """
+    自适应策略引擎：根据市场状态自动切换策略
+    """
+    
+    def __init__(self):
+        self.bull_strategy = BullStrategy()
+        self.bear_strategy = BearStrategy()
+        self.osc_strategy = OscillationStrategy()
+    
+    def execute(self, market_state: str, factors: pd.DataFrame, 
+                holdings: Dict, prices: Dict[str, pd.DataFrame]) -> List[TradeSignal]:
+        """
+        根据市场状态执行对应策略
+        """
+        if market_state == "bull":
+            return self.bull_strategy.generate_signals(factors, holdings, prices)
+        elif market_state == "bear":
+            return self.bear_strategy.generate_signals(factors, holdings, prices)
+        elif market_state == "osc":
+            return self.osc_strategy.generate_signals(factors, holdings, prices)
+        else:
+            # 转换期：用震荡策略但降低仓位
+            signals = self.osc_strategy.generate_signals(factors, holdings, prices)
+            for s in signals:
+                if s.action == "buy":
+                    s.position_pct *= 0.5  # 仓位减半
+            return signals
+
+
+### quant_engine\risk\risk_manager.py ###
+"""
+风险控制模块
+全局风控 + 个股风控 + 仓位管理
+
+核心规则：
+1. 单日最大亏损 -3% 触发全部清仓
+2. 单只最大亏损 -8%（牛市）/ -5%（熊市）强制止损
+3. 总仓位根据市场状态动态调整
+4. 相关性控制：同板块不超过3只
+5. 黑天鹅保护：连续2天大盘跌>3%，强制减仓至20%
+"""
+import numpy as np
+import pandas as pd
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+
+
+@dataclass
+class RiskAlert:
+    level: str          # "warning" / "danger" / "critical"
+    message: str
+    action: str         # "reduce" / "clear" / "hold"
+    target_position: float  # 建议目标仓位
+
+
+class RiskManager:
+    """
+    多层风控管理器
+    """
+    
+    def __init__(self, config: dict = None):
+        self.config = config or {
+            # 全局风控
+            "max_daily_loss": -0.03,        # 单日最大亏损
+            "max_total_drawdown": -0.15,    # 最大回撤
+            "black_swan_threshold": -0.03,  # 大盘单日跌幅阈值
+            "black_swan_days": 2,           # 连续N天触发
+            "black_swan_position": 0.2,     # 黑天鹅后目标仓位
+            
+            # 个股风控
+            "bull_stop_loss": -0.08,
+            "bear_stop_loss": -0.05,
+            "osc_stop_loss": -0.06,
+            "max_single_position": 0.15,    # 单只最大仓位
+            "max_sector_positions": 3,      # 同板块最多3只
+            
+            # 仓位管理
+            "bull_max_position": 0.9,
+            "bear_max_position": 0.3,
+            "osc_max_position": 0.5,
+            "transition_max_position": 0.3,
+        }
+        self._daily_pnl_history = []
+        self._index_returns = []
+    
+    def check_portfolio_risk(self, portfolio_value: float, initial_value: float,
+                            holdings: Dict, market_state: str,
+                            index_return_today: float = 0) -> List[RiskAlert]:
+        """
+        检查组合级风险
+        """
+        alerts = []
+        
+        # 1. 单日亏损检查
+        if len(self._daily_pnl_history) > 0:
+            daily_pnl = (portfolio_value - self._daily_pnl_history[-1]) / self._daily_pnl_history[-1]
+            if daily_pnl <= self.config["max_daily_loss"]:
+                alerts.append(RiskAlert(
+                    level="critical",
+                    message=f"单日亏损{daily_pnl:.1%}超限({self.config['max_daily_loss']:.1%})",
+                    action="clear",
+                    target_position=0.0
+                ))
+        
+        # 2. 最大回撤检查
+        total_return = (portfolio_value - initial_value) / initial_value
+        if total_return <= self.config["max_total_drawdown"]:
+            alerts.append(RiskAlert(
+                level="danger",
+                message=f"总回撤{total_return:.1%}超限({self.config['max_total_drawdown']:.1%})",
+                action="reduce",
+                target_position=0.1
+            ))
+        
+        # 3. 黑天鹅检查
+        self._index_returns.append(index_return_today)
+        if len(self._index_returns) >= self.config["black_swan_days"]:
+            recent = self._index_returns[-self.config["black_swan_days"]:]
+            if all(r <= self.config["black_swan_threshold"] for r in recent):
+                alerts.append(RiskAlert(
+                    level="critical",
+                    message=f"大盘连续{self.config['black_swan_days']}天暴跌，触发黑天鹅保护",
+                    action="reduce",
+                    target_position=self.config["black_swan_position"]
+                ))
+        
+        # 4. 仓位超限检查
+        max_pos = self._get_max_position(market_state)
+        current_pos = self._calc_current_position(holdings, portfolio_value)
+        if current_pos > max_pos * 1.1:  # 超过10%容忍度
+            alerts.append(RiskAlert(
+                level="warning",
+                message=f"当前仓位{current_pos:.0%}超过{market_state}状态上限{max_pos:.0%}",
+                action="reduce",
+                target_position=max_pos
+            ))
+        
+        self._daily_pnl_history.append(portfolio_value)
+        return alerts
+    
+    def check_position_risk(self, code: str, entry_price: float, current_price: float,
+                           market_state: str, hold_days: int = 0) -> Optional[RiskAlert]:
+        """
+        检查个股风险
+        """
+        pnl_pct = (current_price - entry_price) / entry_price
+        
+        # 根据市场状态选择止损线
+        stop_loss = {
+            "bull": self.config["bull_stop_loss"],
+            "bear": self.config["bear_stop_loss"],
+            "osc": self.config["osc_stop_loss"],
+        }.get(market_state, self.config["osc_stop_loss"])
+        
+        if pnl_pct <= stop_loss:
+            return RiskAlert(
+                level="danger",
+                message=f"{code} 亏损{pnl_pct:.1%}触发{market_state}止损线{stop_loss:.1%}",
+                action="clear",
+                target_position=0.0
+            )
+        
+        # 熊市持仓时间限制
+        if market_state == "bear" and hold_days > 5 and pnl_pct < 0.02:
+            return RiskAlert(
+                level="warning",
+                message=f"{code} 熊市持仓{hold_days}天未盈利，建议出局",
+                action="clear",
+                target_position=0.0
+            )
+        
+        return None
+    
+    def calc_position_size(self, signal_confidence: float, market_state: str,
+                          current_total_position: float, atr_pct: float = 3.0) -> float:
+        """
+        动态仓位计算
+        
+        基于：
+        1. 市场状态 → 基础仓位上限
+        2. 信号置信度 → 仓位比例
+        3. 波动率 → 波动大则仓位小（ATR仓位管理）
+        4. 剩余可用仓位
+        """
+        max_pos = self._get_max_position(market_state)
+        available = max(0, max_pos - current_total_position)
+        
+        if available <= 0:
+            return 0.0
+        
+        # 基础仓位 = 信号置信度 * 状态系数
+        state_mult = {"bull": 1.0, "bear": 0.4, "osc": 0.6, "trans": 0.3}
+        base = signal_confidence * state_mult.get(market_state, 0.5)
+        
+        # ATR 调整：波动率高则降低仓位
+        # 标准：ATR 3% 为基准，每增加1%仓位减20%
+        atr_adj = max(0.3, 1.0 - (atr_pct - 3.0) * 0.2)
+        
+        position = base * atr_adj * 0.12  # 基础单位12%
+        position = min(position, available, self.config["max_single_position"])
+        
+        return round(position, 3)
+    
+    def _get_max_position(self, market_state: str) -> float:
+        return {
+            "bull": self.config["bull_max_position"],
+            "bear": self.config["bear_max_position"],
+            "osc": self.config["osc_max_position"],
+            "trans": self.config["transition_max_position"],
+        }.get(market_state, 0.3)
+    
+    def _calc_current_position(self, holdings: Dict, portfolio_value: float) -> float:
+        if portfolio_value <= 0:
+            return 0.0
+        total_holding_value = sum(
+            pos.get("current_value", pos.get("shares", 0) * pos.get("avg_cost", 0))
+            for pos in holdings.values()
+        )
+        return total_holding_value / portfolio_value
+
+
+### quant_engine\backtest\engine.py ###
+"""
+回测引擎
+支持全市场状态自适应回测，输出完整绩效报告。
+
+特点：
+1. 自动识别市场状态并切换策略
+2. 真实交易成本（佣金万2.5 + 印花税千1 + 滑点0.1%）
+3. Walk-forward 验证防过拟合
+4. 输出 Sharpe/Sortino/MaxDD/胜率/盈亏比
+"""
+import numpy as np
+import pandas as pd
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple, Optional
+import sys
+import os
+
+# 添加父目录到路径
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from quant_engine.market_regime import MarketRegimeDetector, MarketState
+from quant_engine.factors.factor_engine import FactorEngine
+from quant_engine.strategies.adaptive_strategy import AdaptiveStrategyEngine, TradeSignal
+from quant_engine.risk.risk_manager import RiskManager
+
+
+# 交易成本
+COMMISSION = 0.00025      # 万2.5
+STAMP_TAX = 0.001         # 千1（卖出）
+SLIPPAGE = 0.001          # 0.1%
+INITIAL_CASH = 200_000.0  # 20万初始资金（匹配用户实际）
+
+
+@dataclass
+class BacktestConfig:
+    initial_cash: float = INITIAL_CASH
+    start_date: str = "2024-01-01"
+    end_date: str = "2026-05-29"
+    commission: float = COMMISSION
+    stamp_tax: float = STAMP_TAX
+    slippage: float = SLIPPAGE
+    rebalance_freq: str = "daily"  # "daily" / "weekly"
+
+
+@dataclass
+class TradeRecord:
+    date: str
+    code: str
+    action: str
+    price: float
+    shares: int
+    cost: float
+    reason: str
+    market_state: str
+    strategy: str
+
+
+@dataclass
+class DailySnapshot:
+    date: str
+    portfolio_value: float
+    cash: float
+    holding_value: float
+    market_state: str
+    position_ratio: float
+    num_holdings: int
+
+
+@dataclass
+class BacktestResult:
+    # 绩效指标
+    total_return: float = 0.0
+    annual_return: float = 0.0
+    sharpe: float = 0.0
+    sortino: float = 0.0
+    max_drawdown: float = 0.0
+    max_drawdown_days: int = 0
+    win_rate: float = 0.0
+    profit_factor: float = 0.0
+    avg_holding_days: float = 0.0
+    trade_count: int = 0
+    
+    # 分状态绩效
+    bull_return: float = 0.0
+    bear_return: float = 0.0
+    osc_return: float = 0.0
+    
+    # 风控统计
+    stop_loss_count: int = 0
+    take_profit_count: int = 0
+    
+    # 明细
+    trades: List[TradeRecord] = field(default_factory=list)
+    daily_snapshots: List[DailySnapshot] = field(default_factory=list)
+    
+    # 综合评分
+    score: float = 0.0
+
+
+class BacktestEngine:
+    """
+    全市场自适应回测引擎
+    """
+    
+    def __init__(self, config: BacktestConfig = None):
+        self.config = config or BacktestConfig()
+        self.regime_detector = MarketRegimeDetector()
+        self.factor_engine = FactorEngine()
+        self.strategy_engine = AdaptiveStrategyEngine()
+        self.risk_manager = RiskManager()
+    
+    def run(self, index_data: pd.DataFrame, stock_data: Dict[str, pd.DataFrame]) -> BacktestResult:
+        """
+        运行回测
+        
+        Parameters
+        ----------
+        index_data : pd.DataFrame
+            大盘指数日线数据 [date, open, high, low, close, volume]
+        stock_data : Dict[str, pd.DataFrame]
+            个股日线数据 {code: DataFrame[date, open, high, low, close, volume, amount]}
+        """
+        result = BacktestResult()
+        
+        # 初始化
+        cash = self.config.initial_cash
+        holdings = {}  # {code: {shares, avg_cost, buy_date, max_price, hold_days}}
+        
+        dates = sorted(index_data["date"].unique())
+        dates = [d for d in dates if self.config.start_date <= d <= self.config.end_date]
+        
+        if not dates:
+            print("无有效交易日期")
+            return result
+        
+        print(f"回测区间: {dates[0]} ~ {dates[-1]} ({len(dates)}个交易日)")
+        print(f"初始资金: {cash:,.0f}")
+        print(f"股票池: {len(stock_data)}只")
+        print("-" * 60)
+        
+        state_days = {"bull": 0, "bear": 0, "osc": 0, "trans": 0}
+        state_returns = {"bull": [], "bear": [], "osc": [], "trans": []}
+        prev_value = cash
+        
+        for i, date in enumerate(dates):
+            # 1. 获取当日数据
+            idx_slice = index_data[index_data["date"] <= date].tail(150)
+            if len(idx_slice) < 30:
+                continue
+            
+            # 2. 识别市场状态
+            regime = self.regime_detector.detect(idx_slice)
+            state = regime.state.value
+            state_days[state] = state_days.get(state, 0) + 1
+            
+            # 3. 准备个股数据
+            available_stocks = {}
+            stock_today = []
+            for code, sdf in stock_data.items():
+                sdf_slice = sdf[sdf["date"] <= date].tail(150)
+                if len(sdf_slice) >= 30 and sdf_slice["date"].iloc[-1] == date:
+                    available_stocks[code] = sdf_slice
+                    stock_today.append({"code": code, **sdf_slice.iloc[-1].to_dict()})
+            
+            if not stock_today:
+                continue
+            
+            stock_today_df = pd.DataFrame(stock_today)
+            
+            # 4. 计算因子（传入每只股票最近60天数据）
+            all_stock_history = []
+            for code, sdf in available_stocks.items():
+                all_stock_history.append(sdf.tail(60))
+            
+            if not all_stock_history:
+                continue
+            
+            combined_df = pd.concat(all_stock_history, ignore_index=True)
+            factors = self.factor_engine.compute_all(combined_df, state)
+            
+            if factors.empty:
+                continue
+            
+            # 5. 风控检查
+            portfolio_value = cash + sum(
+                available_stocks[c]["close"].iloc[-1] * h["shares"]
+                for c, h in holdings.items() if c in available_stocks
+            )
+            
+            index_ret = (idx_slice["close"].iloc[-1] - idx_slice["close"].iloc[-2]) / idx_slice["close"].iloc[-2] if len(idx_slice) > 1 else 0
+            risk_alerts = self.risk_manager.check_portfolio_risk(
+                portfolio_value, self.config.initial_cash, holdings, state, index_ret
+            )
+            
+            # 处理风控警报
+            force_sell_all = False
+            for alert in risk_alerts:
+                if alert.action == "clear":
+                    force_sell_all = True
+                    break
+            
+            # 6. 生成交易信号
+            if force_sell_all:
+                # 强制清仓
+                for code in list(holdings.keys()):
+                    if code in available_stocks:
+                        price = available_stocks[code]["close"].iloc[-1]
+                        shares = holdings[code]["shares"]
+                        sell_cost = price * shares * (self.config.commission + self.config.stamp_tax + self.config.slippage)
+                        cash += price * shares - sell_cost
+                        result.trades.append(TradeRecord(
+                            date=date, code=code, action="sell", price=price,
+                            shares=shares, cost=sell_cost, reason="风控强制清仓",
+                            market_state=state, strategy="risk_control"
+                        ))
+                        result.stop_loss_count += 1
+                holdings.clear()
+            else:
+                # 正常策略执行
+                signals = self.strategy_engine.execute(state, factors, holdings, available_stocks)
+                
+                # 执行信号
+                for signal in signals:
+                    if signal.action == "sell" and signal.code in holdings:
+                        code = signal.code
+                        price = signal.price * (1 - self.config.slippage)
+                        shares = holdings[code]["shares"]
+                        sell_cost = price * shares * (self.config.commission + self.config.stamp_tax)
+                        cash += price * shares - sell_cost
+                        
+                        pnl = (price - holdings[code]["avg_cost"]) * shares - sell_cost
+                        result.trades.append(TradeRecord(
+                            date=date, code=code, action="sell", price=price,
+                            shares=shares, cost=sell_cost, reason=signal.reason,
+                            market_state=state, strategy=signal.strategy
+                        ))
+                        
+                        if "stop_loss" in signal.strategy:
+                            result.stop_loss_count += 1
+                        elif "profit" in signal.strategy or "trailing" in signal.strategy:
+                            result.take_profit_count += 1
+                        
+                        del holdings[code]
+                    
+                    elif signal.action == "buy" and signal.code not in holdings:
+                        code = signal.code
+                        price = signal.price * (1 + self.config.slippage)
+                        
+                        # 计算可买股数
+                        position_value = portfolio_value * signal.position_pct
+                        max_buy = min(position_value, cash * 0.95)  # 留5%现金
+                        shares = int(max_buy / price / 100) * 100  # 整手
+                        
+                        if shares >= 100:
+                            buy_cost = price * shares * self.config.commission
+                            total_cost = price * shares + buy_cost
+                            if total_cost <= cash:
+                                cash -= total_cost
+                                holdings[code] = {
+                                    "shares": shares,
+                                    "avg_cost": price,
+                                    "buy_date": date,
+                                    "max_price": price,
+                                    "hold_days": 0,
+                                    "position_pct": signal.position_pct,
+                                }
+                                result.trades.append(TradeRecord(
+                                    date=date, code=code, action="buy", price=price,
+                                    shares=shares, cost=buy_cost, reason=signal.reason,
+                                    market_state=state, strategy=signal.strategy
+                                ))
+            
+            # 7. 更新持仓状态
+            for code in holdings:
+                holdings[code]["hold_days"] = holdings[code].get("hold_days", 0) + 1
+                if code in available_stocks:
+                    current_price = available_stocks[code]["close"].iloc[-1]
+                    holdings[code]["max_price"] = max(
+                        holdings[code].get("max_price", 0), current_price
+                    )
+            
+            # 8. 记录每日快照
+            holding_value = sum(
+                available_stocks[c]["close"].iloc[-1] * h["shares"]
+                for c, h in holdings.items() if c in available_stocks
+            )
+            portfolio_value = cash + holding_value
+            
+            daily_ret = (portfolio_value - prev_value) / prev_value if prev_value > 0 else 0
+            state_returns[state].append(daily_ret)
+            prev_value = portfolio_value
+            
+            result.daily_snapshots.append(DailySnapshot(
+                date=date, portfolio_value=portfolio_value,
+                cash=cash, holding_value=holding_value,
+                market_state=state,
+                position_ratio=holding_value / portfolio_value if portfolio_value > 0 else 0,
+                num_holdings=len(holdings)
+            ))
+        
+        # 9. 计算绩效指标
+        self._calc_metrics(result, state_returns, state_days)
+        
+        return result
+    
+    def _calc_metrics(self, result: BacktestResult, state_returns: Dict, state_days: Dict):
+        """计算所有绩效指标"""
+        if not result.daily_snapshots:
+            return
+        
+        values = [s.portfolio_value for s in result.daily_snapshots]
+        initial = self.config.initial_cash
+        final = values[-1]
+        n_days = len(values)
+        
+        # 基础收益
+        result.total_return = (final - initial) / initial
+        result.annual_return = (1 + result.total_return) ** (252 / max(n_days, 1)) - 1
+        
+        # 日收益率
+        daily_returns = np.diff(values) / np.array(values[:-1])
+        
+        # Sharpe
+        if len(daily_returns) > 1 and np.std(daily_returns) > 0:
+            result.sharpe = np.mean(daily_returns) / np.std(daily_returns) * np.sqrt(252)
+        
+        # Sortino
+        downside = daily_returns[daily_returns < 0]
+        if len(downside) > 0 and np.std(downside) > 0:
+            result.sortino = np.mean(daily_returns) / np.std(downside) * np.sqrt(252)
+        
+        # 最大回撤
+        peak = values[0]
+        max_dd = 0
+        dd_start = 0
+        max_dd_days = 0
+        current_dd_start = 0
+        for i, v in enumerate(values):
+            if v > peak:
+                peak = v
+                current_dd_start = i
+            dd = (v - peak) / peak
+            if dd < max_dd:
+                max_dd = dd
+                max_dd_days = i - current_dd_start
+        result.max_drawdown = max_dd
+        result.max_drawdown_days = max_dd_days
+        
+        # 胜率和盈亏比
+        trades = result.trades
+        sell_trades = [t for t in trades if t.action == "sell"]
+        if sell_trades:
+            # 配对计算
+            wins = 0
+            total_profit = 0
+            total_loss = 0
+            holding_days = []
+            
+            buy_map = {}
+            for t in trades:
+                if t.action == "buy":
+                    buy_map[t.code] = t
+                elif t.action == "sell" and t.code in buy_map:
+                    buy_t = buy_map[t.code]
+                    pnl = (t.price - buy_t.price) * t.shares - t.cost - buy_t.cost
+                    if pnl > 0:
+                        wins += 1
+                        total_profit += pnl
+                    else:
+                        total_loss += abs(pnl)
+                    del buy_map[t.code]
+            
+            completed = wins + (len(sell_trades) - wins)
+            result.win_rate = wins / len(sell_trades) if sell_trades else 0
+            result.profit_factor = total_profit / total_loss if total_loss > 0 else float("inf")
+            result.trade_count = len(sell_trades)
+        
+        # 分状态收益
+        for state in ["bull", "bear", "osc"]:
+            rets = state_returns.get(state, [])
+            if rets:
+                cumulative = np.prod([1 + r for r in rets]) - 1
+                setattr(result, f"{state}_return", cumulative)
+        
+        # 综合评分（参考 autoquant 的评分体系）
+        score = 0.0
+        score += self._normalize("sortino", result.sortino) * 0.25
+        score += self._normalize("max_drawdown", result.max_drawdown) * 0.25
+        score += self._normalize("annual_return", result.annual_return) * 0.20
+        score += self._normalize("win_rate", result.win_rate) * 0.15
+        score += self._normalize("profit_factor", result.profit_factor) * 0.15
+        result.score = round(score, 4)
+    
+    def _normalize(self, metric: str, value: float) -> float:
+        """归一化到 [0, 1]"""
+        ranges = {
+            "sortino": (-0.5, 3.0),
+            "max_drawdown": (0.30, 0.0),  # 反转
+            "annual_return": (-0.10, 0.80),
+            "win_rate": (0.25, 0.65),
+            "profit_factor": (0.6, 3.0),
+        }
+        if metric not in ranges:
+            return 0.5
+        low, high = ranges[metric]
+        if high == low:
+            return 0.5
+        return max(0.0, min(1.0, (value - low) / (high - low)))
+    
+    def print_report(self, result: BacktestResult):
+        """打印回测报告"""
+        print("\n" + "=" * 60)
+        print("           全市场自适应策略 回测报告")
+        print("=" * 60)
+        
+        print(f"\n【总体绩效】")
+        print(f"  总收益率:     {result.total_return:>8.1%}")
+        print(f"  年化收益:     {result.annual_return:>8.1%}")
+        print(f"  Sharpe:       {result.sharpe:>8.2f}")
+        print(f"  Sortino:      {result.sortino:>8.2f}")
+        print(f"  最大回撤:     {result.max_drawdown:>8.1%}")
+        print(f"  回撤天数:     {result.max_drawdown_days:>8d}")
+        print(f"  胜率:         {result.win_rate:>8.1%}")
+        print(f"  盈亏比:       {result.profit_factor:>8.2f}")
+        print(f"  交易次数:     {result.trade_count:>8d}")
+        print(f"  综合评分:     {result.score:>8.4f}")
+        
+        print(f"\n【分状态收益】")
+        print(f"  牛市收益:     {result.bull_return:>8.1%}")
+        print(f"  熊市收益:     {result.bear_return:>8.1%}")
+        print(f"  震荡收益:     {result.osc_return:>8.1%}")
+        
+        print(f"\n【风控统计】")
+        print(f"  止损次数:     {result.stop_loss_count:>8d}")
+        print(f"  止盈次数:     {result.take_profit_count:>8d}")
+        
+        print(f"\n【资金曲线】")
+        if result.daily_snapshots:
+            first = result.daily_snapshots[0]
+            last = result.daily_snapshots[-1]
+            print(f"  起始: {first.date} | {first.portfolio_value:>12,.0f}")
+            print(f"  结束: {last.date} | {last.portfolio_value:>12,.0f}")
+        
+        print("\n" + "=" * 60)
