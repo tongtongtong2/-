@@ -746,6 +746,36 @@ def main():
     scored = scored.sort_values("total_score", ascending=False)
     top = scored.head(Config.TOP_N_STOCKS)
 
+    # ── V6 大盘状态判断 ──
+    import sqlite3 as _sq
+    _db = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backtest", "data", "market_data.db")
+    try:
+        _cn = _sq.connect(_db)
+        _cur = _cn.execute("SELECT trade_date, close FROM index_daily ORDER BY trade_date DESC LIMIT 80")
+        _rows = _cur.fetchall()
+        _rows.reverse()
+        _closes = [r[1] for r in _rows]
+        if len(_closes) >= 60:
+            _ma20 = sum(_closes[-20:]) / 20
+            _ma60 = sum(_closes[-60:]) / 60
+            _latest = _closes[-1]
+            if _latest >= _ma60 and _ma20 >= _ma60:
+                _mkt_state, _max_pos = "牛市", 5
+            elif _latest >= _ma60:
+                _mkt_state, _max_pos = "中性", 3
+            else:
+                _mkt_state, _max_pos = "熊市", 2
+            _slot = 200000 / _max_pos
+            print(f"\n{'─'*60}")
+            print(f"  【大盘状态】{_mkt_state}  (MA20={_ma20:.0f} {'>' if _ma20>=_ma60 else '<'} MA60={_ma60:.0f})")
+            print(f"  【仓位建议】最多持 {_max_pos} 只，每只 {_slot:.0f} 元 (20万/{_max_pos})")
+            print(f"  【操作节奏】每天买1只，{_max_pos}天建满仓")
+            print(f"  【止损】买入价×0.93(7%)  【止盈】涨8%后回撤3%卖  【超时】20天")
+            print(f"{'─'*60}")
+        _cn.close()
+    except Exception as _e:
+        print(f"  大盘状态获取失败: {_e}")
+
     print(f"\n{'='*60}")
     print(f"  今日推荐 TOP {len(top)}")
     print(f"{'='*60}\n")
