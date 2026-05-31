@@ -1,6 +1,7 @@
 
 """Day 2: 线性回归 + 决策树 —— 预测涨跌幅 + 规则选股"""
 import numpy as np
+from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")  # 无 GUI 后端，保存图片
 import matplotlib.pyplot as plt
@@ -113,9 +114,9 @@ axes[2].set_xlabel("真实值"); axes[2].set_ylabel("预测值")
 axes[2].legend()
 
 plt.tight_layout()
-plt.savefig("F:/datax/learning/day02_linear_regression.png", dpi=100)
+plt.savefig(str(Path(__file__).parent / "day02_linear_regression.png"), dpi=100)
 plt.close()
-print("\n  图表已保存: F:/datax/learning/day02_linear_regression.png")
+print(f"\n  图表已保存: {Path(__file__).parent}/day02_linear_regression.png")
 
 
 # ============================================================
@@ -226,9 +227,9 @@ plot_tree(dt_final, feature_names=feature_names,
           rounded=True, fontsize=10, ax=ax)
 ax.set_title("决策树可视化 (max_depth=3)", fontsize=14)
 plt.tight_layout()
-plt.savefig("F:/datax/learning/day02_decision_tree.png", dpi=120)
+plt.savefig(str(Path(__file__).parent / "day02_decision_tree.png"), dpi=120)
 plt.close()
-print("  决策树图表已保存: F:/datax/learning/day02_decision_tree.png")
+print(f"  决策树图表已保存: {Path(__file__).parent}/day02_decision_tree.png")
 
 # 额外可视化: 特征空间分割（PE vs ROE）
 fig, ax = plt.subplots(figsize=(8, 6))
