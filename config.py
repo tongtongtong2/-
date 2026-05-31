@@ -1,0 +1,110 @@
+import os
+from urllib.parse import quote_plus
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+
+class Config:
+    """Application configuration class"""
+
+    # MySQL Database Configuration
+    MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
+    try:
+        MYSQL_PORT = int(os.getenv('MYSQL_PORT', 3306))
+    except ValueError:
+        raise ValueError("MYSQL_PORT must be a valid integer")
+    MYSQL_USER = os.getenv('MYSQL_USER', 'root')
+    MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'root')
+    MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'stock_recommendation')
+
+    # SQLAlchemy Configuration
+    SQLALCHEMY_DATABASE_URI = (
+        f"mysql+pymysql://{quote_plus(MYSQL_USER)}:{quote_plus(MYSQL_PASSWORD)}@"
+        f"{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DATABASE}?charset=utf8mb4"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ECHO = False
+
+    # Flask Configuration
+    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    DEBUG = os.getenv('DEBUG', 'True').lower() in ('true', '1', 'yes')
+
+    # Stock Selection Parameters
+    try:
+        TOP_N_STOCKS = int(os.getenv('TOP_N_STOCKS', 10))
+    except ValueError:
+        raise ValueError("TOP_N_STOCKS must be a valid integer")
+    try:
+        MIN_VOLUME = float(os.getenv('MIN_VOLUME', 100000000))
+    except ValueError:
+        raise ValueError("MIN_VOLUME must be a valid number")
+
+    # Trading Parameters
+    try:
+        TAKE_PROFIT = float(os.getenv('TAKE_PROFIT', 0.10))
+    except ValueError:
+        raise ValueError("TAKE_PROFIT must be a valid float")
+    try:
+        STOP_LOSS = float(os.getenv('STOP_LOSS', -0.07))
+    except ValueError:
+        raise ValueError("STOP_LOSS must be a valid float")
+    try:
+        MAX_HOLD_DAYS = int(os.getenv('MAX_HOLD_DAYS', 30))
+    except ValueError:
+        raise ValueError("MAX_HOLD_DAYS must be a valid integer")
+
+    # 市场环境过滤：仅当沪深300 > MA60 时选股
+    MARKET_FILTER = os.getenv('MARKET_FILTER', 'True').lower() in ('true', '1', 'yes')
+    INDEX_MA_PERIOD = int(os.getenv('INDEX_MA_PERIOD', '60'))
+    try:
+        MAX_PER_SECTOR = int(os.getenv('MAX_PER_SECTOR', '2'))
+    except ValueError:
+        MAX_PER_SECTOR = 2
+
+    # Scheduler Times (24-hour format)
+    SELECTION_TIME = os.getenv('SELECTION_TIME', '15:30')
+    OPEN_FILL_TIME = os.getenv('OPEN_FILL_TIME', '09:35')  # 次日开盘价回填
+    UPDATE_TIME = os.getenv('UPDATE_TIME', '15:35')
+    STATISTICS_TIME = os.getenv('STATISTICS_TIME', '15:40')
+
+    # 行情数据源：auto = 先试东方财富再回落新浪；sina = 直接走新浪，跳过东方财富探测
+    SPOT_SOURCE = os.getenv('SPOT_SOURCE', 'auto').lower()
+
+    # ─── 基本面过滤 ───
+    FUNDAMENTAL_FILTER = os.getenv('FUNDAMENTAL_FILTER', 'True').lower() in ('true', '1', 'yes')
+    MIN_ROE = float(os.getenv('MIN_ROE', '8.0'))
+    PE_MULT = float(os.getenv('PE_MULT', '1.5'))  # PE > 行业中位数 * PE_MULT 则剔除
+
+    # ─── ATR 动态止损 ───
+    USE_ATR_STOP = os.getenv('USE_ATR_STOP', 'True').lower() in ('true', '1', 'yes')
+    ATR_MULT = float(os.getenv('ATR_MULT', '2.0'))
+    TRAILING_ATR_MULT = float(os.getenv('TRAILING_ATR_MULT', '1.0'))
+
+    # ─── 因子权重（总和约 98%，加上 bonus/penalty 可超 100） ───
+    W_TREND = float(os.getenv('W_TREND', '0.20'))
+    W_SMOOTH = float(os.getenv('W_SMOOTH', '0.25'))
+    W_VOLUME = float(os.getenv('W_VOLUME', '0.12'))
+    W_POSITION = float(os.getenv('W_POSITION', '0.10'))
+    W_LIQUIDITY = float(os.getenv('W_LIQUIDITY', '0.05'))
+    W_HISTORY = float(os.getenv('W_HISTORY', '0.08'))
+    W_SECTOR_FLOW = float(os.getenv('W_SECTOR_FLOW', '0.05'))
+    W_INDIVIDUAL_FLOW = float(os.getenv('W_INDIVIDUAL_FLOW', '0.08'))
+    W_NORTHBOUND = float(os.getenv('W_NORTHBOUND', '0.05'))
+    W_STRATEGY = float(os.getenv('W_STRATEGY', '0.10'))
+
+    # ─── ML 评分（LightGBM） ───
+    USE_ML_SCORING = os.getenv('USE_ML_SCORING', 'False').lower() in ('true', '1', 'yes')
+    ML_MODEL_PATH = os.getenv('ML_MODEL_PATH', 'models/lgbm_ranker.pkl')
+
+    # Logging Configuration
+    LOG_DIR = os.getenv('LOG_DIR', 'logs')
+    LOG_FILE = os.getenv('LOG_FILE', 'app.log')
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+
+    @classmethod
+    def init_app(cls, app):
+        """Initialize application with configuration"""
+        # Create logs directory if it doesn't exist
+        os.makedirs(cls.LOG_DIR, exist_ok=True)

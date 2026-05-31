@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% set nav = 'stats' %}
+{% block title %}策略统计 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<h3 class="mb-3">策略统计</h3>
+
+{% if latest %}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">累计推荐</div><div class="stat-value">{{ latest.total_recommendations }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">活跃 / 已平仓</div>
+    <div class="stat-value">{{ latest.active_positions }} / {{ latest.closed_positions }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">胜率</div>
+    <div class="stat-value">{{ '%.2f'|format((latest.win_rate or 0) * 100) }}%</div>
+    <div class="small text-muted">盈 {{ latest.win_count }} / 亏 {{ latest.loss_count }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">平均收益（每笔）</div>
+    <div class="stat-value {% if (latest.avg_return or 0) >= 0 %}text-up{% else %}text-down{% endif %}">
+      {{ '%+.0f'|format(realized_pnl / latest.closed_positions if latest and latest.closed_positions else 0) }}
+    </div>
+    <div class="small text-muted">百分比 {{ '%.2f'|format((latest.avg_return or 0) * 100) }}%</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">最大盈利</div>
+    <div class="stat-value text-up">{{ '%+.0f'|format(max_win_amt) }}</div>
+    <div class="small text-muted">{{ '%.2f'|format((latest.max_return or 0) * 100) }}%</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">最大亏损</div>
+    <div class="stat-value text-down">{{ '%+.0f'|format(max_loss_amt) }}</div>
+    <div class="small text-muted">{{ '%.2f'|format((latest.max_loss or 0) * 100) }}%</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">累计收益（金额）</div>
+    <div class="stat-value {% if realized_pnl >= 0 %}text-up{% else %}text-down{% endif %}">
+      {{ '%+.0f'|format(realized_pnl) }}
+    </div>
+    <div class="small text-muted">百分比 {{ '%.2f'|format((latest.total_return or 0) * 100) }}%</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body">
+    <div class="stat-label">最近统计日</div>
+    <div class="stat-value fs-4">{{ latest.stat_date }}</div>
+  </div></div></div>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <h6 class="card-title">近 60 日 胜率 / 平均收益 / 累计收益（%）</h6>
+    <canvas id="chart-stats" height="110"></canvas>
+  </div>
+</div>
+
+<h5>历史快照</h5>
+<div class="table-responsive">
+  <table class="table table-sm table-striped">
+    <thead class="table-light"><tr>
+      <th>日期</th><th>推荐</th><th>活跃</th><th>平仓</th><th>胜</th><th>亏</th>
+      <th>胜率</th><th>平均</th><th>累计</th>
+    </tr></thead>
+    <tbody>
+    {% for s in history|reverse %}
+      <tr>
+        <td>{{ s.stat_date }}</td>
+        <td>{{ s.total_recommendations }}</td>
+        <td>{{ s.active_positions }}</td>
+        <td>{{ s.closed_positions }}</td>
+        <td>{{ s.win_count }}</td>
+        <td>{{ s.loss_count }}</td>
+        <td>{{ '%.2f'|format((s.win_rate or 0) * 100) }}%</td>
+        <td class="{% if (s.avg_return or 0) >= 0 %}text-up{% else %}text-down{% endif %}">{{ '%.2f'|format((s.avg_return or 0) * 100) }}%</td>
+        <td class="{% if (s.total_return or 0) >= 0 %}text-up{% else %}text-down{% endif %}">{{ '%.2f'|format((s.total_return or 0) * 100) }}%</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">暂无统计数据。请先触发更新（在“今日推荐”页点击 <b>更新表现</b>）。</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+fetch('{{ url_for("main.api_stats_chart") }}?days=60')
+  .then(r => r.json())
+  .then(data => {
+    if (!data.labels || !data.labels.length) return;
+    const ctx = document.getElementById('chart-stats');
+    if (!ctx) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: data.labels,
+        datasets: [
+          { label: '胜率%', data: data.win_rate, borderColor: '#0d6efd', tension: 0.25, fill: false },
+          { label: '平均收益%', data: data.avg_return, borderColor: '#198754', tension: 0.25, fill: false },
+          { label: '累计收益%', data: data.total_return, borderColor: '#dc3545', tension: 0.25, fill: false },
+        ]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'top' } },
+        scales: { y: { beginAtZero: false } }
+      }
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set nav = 'perf' %}
+{% block title %}表现跟踪 · 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h3 class="mb-0">活跃推荐表现</h3>
+  <button id="btn-trigger-update" class="btn btn-outline-primary btn-sm">立即刷新</button>
+</div>
+
+<div class="text-muted small mb-2">共 {{ items|length }} 只活跃持仓，按当前涨跌幅倒序。卖出信号已高亮。</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-light">
+      <tr>
+        <th>代码</th>
+        <th>名称</th>
+        <th>推荐日</th>
+        <th class="text-end">推荐价</th>
+        <th class="text-end">现价</th>
+        <th class="text-end">涨跌幅</th>
+        <th class="text-end">持仓(股)</th>
+        <th class="text-end">盈亏金额</th>
+        <th>信号</th>
+        <th>原因</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in items %}
+      <tr class="{% if r.signal == 'sell' %}table-danger{% elif (r.change_percent or 0) >= 0.05 %}table-success{% endif %}">
+        <td class="font-monospace">{{ r.stock_code }}</td>
+        <td>{{ r.stock_name }}</td>
+        <td>{{ r.recommend_date }}</td>
+        <td class="text-end">{% if r.recommend_price is not none %}<span class="js-editable-price" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.recommend_price) }}" title="点击修改成本价">{{ '%.2f'|format(r.recommend_price) }}</span>{% else %}-{% endif %}</td>
+        <td class="text-end">{% if r.current_price is not none %}<span class="js-editable-curprice" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.current_price) }}" title="点击修改现价">{{ '%.2f'|format(r.current_price) }}</span>{% else %}-{% endif %}</td>
+        <td class="text-end fw-bold js-change-cell {% if (r.change_percent or 0) > 0 %}text-up{% elif (r.change_percent or 0) < 0 %}text-down{% endif %}">
+          {% if r.change_percent is not none %}{{ '%.2f'|format(r.change_percent * 100) }}%{% else %}-{% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.shares and r.shares > 0 %}
+            <span class="js-editable-shares" data-rec-id="{{ r.id }}" data-shares="{{ r.shares }}" title="点击修改股数">{{ r.shares }}</span>
+          {% else %}
+            <span class="js-editable-shares text-muted" data-rec-id="{{ r.id }}" data-shares="0" title="点击填写股数">-</span>
+          {% endif %}
+        </td>
+        <td class="text-end fw-bold js-pnl-cell {% if (r.pnl_amount or 0) > 0 %}text-up{% elif (r.pnl_amount or 0) < 0 %}text-down{% endif %}">
+          {% if r.pnl_amount is defined and r.pnl_amount != 0 %}{{ '%+.2f'|format(r.pnl_amount) }}{% else %}-{% endif %}
+        </td>
+        <td>{% include "_signal_badge.html" with context %}</td>
+        <td class="small text-muted">{{ r.signal_reason or '-' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="text-center text-muted py-4">当前没有活跃推荐</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

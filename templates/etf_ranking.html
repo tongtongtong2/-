@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}智能选基 — ETF 排名{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>🎯 智能选基排名</h2>
+  <div>
+    <a href="{{ url_for('etf.overview') }}" class="btn btn-outline-primary btn-sm">📊 基金池</a>
+    <a href="{{ url_for('etf.flow') }}" class="btn btn-outline-info btn-sm">💰 资金流</a>
+    <a href="{{ url_for('etf.pnl') }}" class="btn btn-outline-success btn-sm">📈 盈亏</a>
+  </div>
+</div>
+
+<!-- 大盘环境 -->
+{% if market.status == 'bull' %}
+<div class="alert alert-success py-2">
+  🟢 {{ market.message }} — 可正常操作
+</div>
+{% elif market.status == 'bear' %}
+<div class="alert alert-warning py-2">
+  🟡 {{ market.message }} — 建议减仓或观望
+</div>
+{% else %}
+<div class="alert alert-secondary py-2">
+  {{ market.message }}
+</div>
+{% endif %}
+
+<!-- 统计 -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card text-bg-primary"><div class="card-body text-center">
+      <h5>{{ ranks|length }}</h5><small>候选基金</small>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-bg-success"><div class="card-body text-center">
+      <h5>{{ buy_count }}</h5><small>🟢 BUY 信号</small>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-bg-danger"><div class="card-body text-center">
+      <h5>{{ sell_count }}</h5><small>🔴 SELL 信号</small>
+    </div></div>
+  </div>
+  <div class="col-md-3">
+    <div class="card text-bg-info"><div class="card-body text-center">
+      <h5>4因子</h5><small>趋势/动能/RSI/布林带</small>
+    </div></div>
+  </div>
+</div>
+
+<!-- TOP 5 推荐 -->
+{% if market.status == 'bull' and top5 %}
+<div class="card border-success mb-4">
+  <div class="card-header bg-success text-white">
+    <strong>⭐ 今日精选（综合评分 ≥ 50 + 大盘偏强）</strong>
+  </div>
+  <div class="card-body">
+    <div class="row g-3">
+      {% for r in top5 %}
+      <div class="col-md-4">
+        <div class="card h-100 {% if r.final_score >= 70 %}border-danger{% elif r.final_score >= 50 %}border-warning{% endif %}">
+          <div class="card-body">
+            <h6>
+              <a href="{{ url_for('etf.detail', code=r.code) }}">{{ r.name }}</a>
+              <code>{{ r.code }}</code>
+            </h6>
+            <div class="mb-2">
+              <span class="badge bg-primary">{{ r.confidence }}</span>
+              {% if r.signal == 'BUY' %}<span class="badge bg-success">BUY</span>
+              {% elif r.signal == 'SELL' %}<span class="badge bg-danger">SELL</span>
+              {% else %}<span class="badge bg-secondary">HOLD</span>{% endif %}
+              <span class="badge bg-info">{{ r.position_advice }}</span>
+            </div>
+            <table class="table table-sm mb-0 small">
+              <tr><td>综合评分</td><td class="fw-bold">{{ r.final_score }}</td></tr>
+              <tr><td>基础分</td><td>{{ r.score }}</td></tr>
+              <tr><td>资金流加分</td><td class="{% if r.flow_bonus > 0 %}text-danger{% else %}text-success{% endif %}">{{ "%+d"|format(r.flow_bonus) }}</td></tr>
+              <tr><td>板块</td><td>{{ r.sector_name }} {{ "%+.1f"|format(r.sector_inflow_yi) }}亿</td></tr>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 完整排名 -->
+<h5>📋 全部排名</h5>
+<div class="table-responsive">
+  <table class="table table-hover table-sm align-middle">
+    <thead class="table-dark">
+      <tr>
+        <th>#</th><th>代码</th><th>名称</th><th>信号</th>
+        <th>基础分</th><th>资金流</th><th>综合分</th><th>信心度</th>
+        <th>趋势</th><th>MACD</th><th>RSI</th><th>布林</th>
+        <th>量比</th><th>板块资金</th><th>建议</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in ranks %}
+      <tr class="{% if r.final_score >= 70 %}table-danger{% elif r.final_score >= 50 %}table-warning{% endif %}">
+        <td>{{ loop.index }}</td>
+        <td><code>{{ r.code }}</code></td>
+        <td><a href="{{ url_for('etf.detail', code=r.code) }}" class="text-decoration-none">{{ r.name }}</a></td>
+        <td>
+          {% if r.signal == 'BUY' %}<span class="badge bg-success">BUY</span>
+          {% elif r.signal == 'SELL' %}<span class="badge bg-danger">SELL</span>
+          {% else %}<span class="badge bg-secondary">HOLD</span>{% endif %}
+        </td>
+        <td>{{ r.score }}</td>
+        <td class="{% if r.flow_bonus > 0 %}text-danger{% elif r.flow_bonus < 0 %}text-success{% endif %}">{{ "%+d"|format(r.flow_bonus) }}</td>
+        <td class="fw-bold">{{ r.final_score }}</td>
+        <td>{{ r.confidence }}</td>
+        <td>{{ r.s_trend }}</td>
+        <td>{{ r.s_macd }}</td>
+        <td>{{ r.s_rsi }}</td>
+        <td>{{ r.s_bb }}</td>
+        <td>{{ r.vol_mult }}</td>
+        <td>{{ r.sector_name }} {{ "%+.1f"|format(r.sector_inflow_yi) }}亿</td>
+        <td><span class="badge bg-info">{{ r.position_advice }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="text-muted small mt-3">
+  📐 评分公式：综合分 = 基础分(趋势35%+MACD25%+RSI15%+布林25%)×量比置信度 + 板块资金流加分(-10~+10)
+</div>
+{% endblock %}

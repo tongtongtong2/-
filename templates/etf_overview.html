@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}ETF 基金池 — 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>📊 ETF 基金池</h2>
+  <div>
+    <a href="{{ url_for('etf.ranking') }}" class="btn btn-outline-warning btn-sm">🎯 智能选基</a>
+    <a href="{{ url_for('etf.flow') }}" class="btn btn-outline-info btn-sm">💰 板块资金流</a>
+    <a href="{{ url_for('etf.pnl') }}" class="btn btn-outline-success btn-sm">📈 盈亏</a>
+  </div>
+</div>
+
+<!-- 大盘 -->
+{% if market.status == 'bull' %}
+<div class="alert alert-success py-2">🟢 {{ market.message }}</div>
+{% elif market.status == 'bear' %}
+<div class="alert alert-warning py-2">🟡 {{ market.message }} — 选基建议减仓或观望</div>
+{% endif %}
+
+<!-- 统计 -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3"><div class="card text-bg-primary"><div class="card-body text-center">
+    <h5>{{ pool|length }}</h5><small>基金总数</small>
+  </div></div></div>
+  <div class="col-md-3"><div class="card text-bg-success"><div class="card-body text-center">
+    <h5>{{ buy_count }}</h5><small>🟢 买入信号</small>
+  </div></div></div>
+  <div class="col-md-3"><div class="card text-bg-danger"><div class="card-body text-center">
+    <h5>{{ sell_count }}</h5><small>🔴 卖出信号</small>
+  </div></div></div>
+  <div class="col-md-3"><div class="card text-bg-secondary"><div class="card-body text-center">
+    <h5>{{ hold_count }}</h5><small>⚪ 持有/观望</small>
+  </div></div></div>
+</div>
+
+<!-- 宽基 -->
+<h4>🏛️ 宽基指数</h4>
+<div class="table-responsive mb-4">
+  <table class="table table-hover table-sm align-middle">
+    <thead class="table-dark">
+      <tr><th>代码</th><th>名称</th><th>收盘</th><th>净值</th><th>折溢价</th>
+        <th>量(手)</th><th>评分</th><th>信号</th><th>建议</th><th>盈亏</th></tr>
+    </thead>
+    <tbody>
+      {% for etf in broad %}
+      <tr>
+        <td><code>{{ etf.code }}</code></td>
+        <td><a href="{{ url_for('etf.detail', code=etf.code) }}" class="text-decoration-none">{{ etf.name }}</a></td>
+        <td>{{ "%.3f"|format(etf.close) if etf.close else "-" }}</td>
+        <td>{{ "%.4f"|format(etf.nav) if etf.nav else "-" }}</td>
+        <td>{% if etf.premium_rate is not none %}<span class="{% if etf.premium_rate > 0 %}text-danger{% else %}text-success{% endif %}">{{ "%+.2f"|format(etf.premium_rate) }}%</span>{% else %}-{% endif %}</td>
+        <td>{{ "%.0f"|format(etf.volume) if etf.volume else "-" }}</td>
+        <td>{{ etf.score|round(1) if etf.score else "-" }}</td>
+        <td>{% if etf.signal == 'BUY' %}<span class="badge bg-success">BUY</span>{% elif etf.signal == 'SELL' %}<span class="badge bg-danger">SELL</span>{% else %}<span class="badge bg-secondary">{{ etf.signal }}</span>{% endif %}</td>
+        <td>{% if etf.advice in ('BUY','建仓') %}<span class="badge bg-success">建仓</span>{% elif etf.advice in ('SELL','清仓') %}<span class="badge bg-danger">清仓</span>{% elif etf.advice == '加仓' %}<span class="badge bg-warning">加仓</span>{% else %}<span class="badge bg-secondary">{{ etf.advice }}</span>{% endif %}</td>
+        <td>{% if etf.pnl_pct is not none %}<span class="{% if etf.pnl_pct > 0 %}text-danger{% else %}text-success{% endif %}">{{ "%+.2f"|format(etf.pnl_pct * 100 if etf.pnl_pct < 1 else etf.pnl_pct) }}%</span>{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- 行业 -->
+<h4>🏭 行业 ETF</h4>
+<div class="table-responsive">
+  <table class="table table-hover table-sm align-middle">
+    <thead class="table-dark">
+      <tr><th>代码</th><th>名称</th><th>收盘</th><th>净值</th><th>折溢价</th>
+        <th>量(手)</th><th>评分</th><th>信号</th><th>建议</th><th>盈亏</th></tr>
+    </thead>
+    <tbody>
+      {% for etf in sector %}
+      <tr>
+        <td><code>{{ etf.code }}</code></td>
+        <td><a href="{{ url_for('etf.detail', code=etf.code) }}" class="text-decoration-none">{{ etf.name }}</a></td>
+        <td>{{ "%.3f"|format(etf.close) if etf.close else "-" }}</td>
+        <td>{{ "%.4f"|format(etf.nav) if etf.nav else "-" }}</td>
+        <td>{% if etf.premium_rate is not none %}<span class="{% if etf.premium_rate > 0 %}text-danger{% else %}text-success{% endif %}">{{ "%+.2f"|format(etf.premium_rate) }}%</span>{% else %}-{% endif %}</td>
+        <td>{{ "%.0f"|format(etf.volume) if etf.volume else "-" }}</td>
+        <td>{{ etf.score|round(1) if etf.score else "-" }}</td>
+        <td>{% if etf.signal == 'BUY' %}<span class="badge bg-success">BUY</span>{% elif etf.signal == 'SELL' %}<span class="badge bg-danger">SELL</span>{% else %}<span class="badge bg-secondary">{{ etf.signal }}</span>{% endif %}</td>
+        <td>{% if etf.advice in ('BUY','建仓') %}<span class="badge bg-success">建仓</span>{% elif etf.advice in ('SELL','清仓') %}<span class="badge bg-danger">清仓</span>{% elif etf.advice == '加仓' %}<span class="badge bg-warning">加仓</span>{% else %}<span class="badge bg-secondary">{{ etf.advice }}</span>{% endif %}</td>
+        <td>{% if etf.pnl_pct is not none %}<span class="{% if etf.pnl_pct > 0 %}text-danger{% else %}text-success{% endif %}">{{ "%+.2f"|format(etf.pnl_pct * 100 if etf.pnl_pct < 1 else etf.pnl_pct) }}%</span>{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<hr><div class="text-muted small">📡 数据来自 ETF 右侧交易系统 · 信号基于多因子综合评分（趋势/动能/RSI/布林带）</div>
+{% endblock %}

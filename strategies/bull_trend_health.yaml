@@ -1,0 +1,11 @@
+# 多头趋势健康度（基础分）
+name: bull_trend_health
+display_name: 多头趋势
+description: 基础趋势判断：均线多头排列 + 趋势强度。这是所有策略的底色。
+category: trend
+weight: 1.0
+conditions:
+  ma_alignment: "MA5 >= MA10 >= MA20 且 MA20向上"
+  trend_strength: "MA5斜率 > 0"
+  above_ma60: "价格 > MA60"
+score_bonus: 8

@@ -1,0 +1,11 @@
+# 均线金叉策略
+name: ma_golden_cross
+display_name: 均线金叉
+description: MA5上穿MA10（3日内）+ 放量确认。经典趋势启动/延续信号。
+category: trend
+weight: 0.8
+conditions:
+  golden_cross: "最近3个交易日内 MA5 上穿 MA10"
+  volume_confirm: "金叉日成交量 > 5日均量"
+  not_extended: "现价距MA5 < 5%"
+score_bonus: 10

@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% set nav = 'index' %}
+{% block title %}持仓总览 · 股票推荐平台{% endblock %}
+
+{% block content %}
+{# ── 大盘状态栏 ── #}
+<div id="market-status-bar" class="alert mb-3 py-2 px-3 d-flex align-items-center gap-3" role="alert"
+     style="border-radius:10px;">
+  <div class="spinner-border spinner-border-sm text-secondary" role="status"></div>
+  <span class="small">正在获取大盘状态…</span>
+</div>
+
+{# ── 我的持仓 ── #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">💰 我的持仓</h3>
+    <div class="text-muted small">{{ recommend_date }} · 止盈 +10% / 止损 -7%</div>
+  </div>
+  <div class="text-end">
+    <div class="text-muted small">总浮动盈亏（含手续费）</div>
+    <div id="total-pnl" class="fs-4 fw-bold {% if total_pnl >= 0 %}text-up{% else %}text-down{% endif %}">
+      {{ '%+.0f'|format(total_pnl) }}
+    </div>
+  </div>
+</div>
+
+{% if holdings %}
+<div class="row g-3 mb-4" id="holdings-row">
+  {% for h in holdings %}
+  <div class="col-12 col-md-6 col-xl-4">
+    <div class="card stat-card holding-card" data-code="{{ h.stock_code }}">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <span class="font-monospace fw-bold">{{ h.stock_code }}</span>
+            <span class="ms-2 fw-bold">{{ h.stock_name }}</span>
+          </div>
+          {% with r=h %}{% include "_signal_badge.html" %}{% endwith %}
+        </div>
+
+        <div class="row g-2 small">
+          <div class="col-6">
+            <div class="text-muted">成本</div>
+            <div class="fw-bold">{{ '%.2f'|format(h.recommend_price) if h.recommend_price else '-' }}</div>
+          </div>
+          <div class="col-6">
+            <div class="text-muted">现价</div>
+            <div class="fw-bold">{{ '%.2f'|format(h.current_price) if h.current_price else '-' }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted">持仓</div>
+            <div>{{ h.shares or 0 }}股</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted">市值</div>
+            <div>{{ '%.0f'|format((h.current_price or 0) * (h.shares or 0)) if h.current_price and h.shares else '-' }}</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted">含费成本</div>
+            <div class="small">{{ '%.0f'|format(h.total_cost or 0) }}</div>
+          </div>
+        </div>
+
+        {% set cp = h.current_price or 0 %}
+        {% set cost = h.recommend_price or 0 %}
+        {% set chg = ((cp - cost) / cost * 100) if cost > 0 else 0 %}
+        {% set net_pnl = h.net_pnl or 0 %}
+        <div class="mt-2 d-flex justify-content-between align-items-center">
+          <div>
+            <span class="fw-bold {% if chg > 0 %}text-up{% elif chg < 0 %}text-down{% endif %}">
+              {{ '%+.2f'|format(chg) }}%
+            </span>
+            <span class="ms-2 {% if net_pnl >= 0 %}text-up{% else %}text-down{% endif %}">
+              {{ '%+.0f'|format(net_pnl) }}
+            </span>
+          </div>
+          <div class="small text-muted text-end">
+            <div>回本 {{ '%.2f'|format(h.breakeven_price or 0) }}</div>
+            <div>止 {{ '%.2f'|format(cost * 0.93) if cost else '-' }} / 盈 {{ '%.2f'|format(cost * 1.10) if cost else '-' }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-light text-muted mb-4">暂无持仓</div>
+{% endif %}
+
+{# ── 今日推荐 ── #}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <h3 class="mb-1">📊 今日推荐 <span class="text-muted fs-6">{{ recommend_date }}</span></h3>
+    <div class="text-muted small">均线多头 + 趋势平稳 + 温和放量 + 行业分散 · 综合分含历史连续性因子</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button id="btn-trigger-selection" class="btn btn-primary btn-sm">手动选股</button>
+    <button id="btn-trigger-open-fill" class="btn btn-outline-success btn-sm">回填开盘价</button>
+    <button id="btn-trigger-update" class="btn btn-outline-primary btn-sm">更新表现</button>
+  </div>
+</div>
+
+{% if stats %}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card stat-card"><div class="card-body">
+      <div class="stat-label">累计推荐</div>
+      <div class="stat-value">{{ stats.total_recommendations }}</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card"><div class="card-body">
+      <div class="stat-label">活跃持仓</div>
+      <div class="stat-value">{{ stats.active_positions }}</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card"><div class="card-body">
+      <div class="stat-label">胜率</div>
+      <div class="stat-value">{{ '%.1f'|format((stats.win_rate or 0) * 100) }}%</div>
+    </div></div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card"><div class="card-body">
+      <div class="stat-label">累计收益</div>
+      <div class="stat-value {% if realized_pnl >= 0 %}text-up{% else %}text-down{% endif %}">
+        {{ '%+.0f'|format(realized_pnl) }}
+      </div>
+    </div></div>
+  </div>
+</div>
+{% endif %}
+
+{% if recommendations %}
+{# ── 筛选栏 ── #}
+<div class="card mb-3 filter-bar">
+  <div class="card-body py-2">
+    <div class="row g-2 align-items-end">
+      <div class="col-auto">
+        <label class="form-label small mb-1">最低综合分</label>
+        <input id="filter-score" type="number" class="form-control form-control-sm" style="width:100px" min="0" max="100" step="1" placeholder="0">
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">信号</label>
+        <select id="filter-signal" class="form-select form-select-sm" style="width:110px">
+          <option value="">全部</option>
+          <option value="buy">买入</option>
+          <option value="hold">持有</option>
+          <option value="sell">卖出</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">历史</label>
+        <select id="filter-history" class="form-select form-select-sm" style="width:130px">
+          <option value="">全部</option>
+          <option value="0">首次出现</option>
+          <option value="1">出现1次</option>
+          <option value="2">连续≥2次</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="form-label small mb-1">搜索</label>
+        <input id="filter-search" type="text" class="form-control form-control-sm" style="width:140px" placeholder="代码或名称">
+      </div>
+      <div class="col-auto">
+        <button id="btn-reset-filter" class="btn btn-sm btn-outline-secondary">重置筛选</button>
+      </div>
+      <div class="col-auto ms-auto">
+        <span id="filter-count" class="text-muted small"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-hover align-middle" id="rec-table">
+    <thead class="table-light">
+      <tr>
+        <th>#</th>
+        <th class="sortable" data-sort="code">代码 <span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort="name">名称 <span class="sort-arrow"></span></th>
+        <th>历史</th>
+        <th class="sortable text-end" data-sort="rec_price">推荐价 <span class="sort-arrow"></span></th>
+        <th class="sortable text-end" data-sort="cur_price">现价 <span class="sort-arrow"></span></th>
+        <th class="sortable text-end" data-sort="change">涨跌幅 <span class="sort-arrow"></span></th>
+        <th class="text-end">持仓(股)</th>
+        <th class="text-end">盈亏金额</th>
+        <th>状态</th>
+        <th>信号</th>
+        <th class="sortable text-end" data-sort="score" data-default-desc="true">综合分 <span class="sort-arrow"></span></th>
+        <th>因子明细</th>
+        <th class="text-center">观察</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in recommendations %}
+      {% set hcnt = r.history_count or 0 %}
+      <tr data-rec-id="{{ r.id }}"
+          data-score="{{ r.recommend_reason.total_score if r.recommend_reason and r.recommend_reason.total_score is defined else 0 }}"
+          data-signal="{{ r.signal or '' }}"
+          data-history-count="{{ hcnt }}"
+          data-code="{{ r.stock_code }}"
+          data-name="{{ r.stock_name }}"
+          data-rec-price="{{ r.recommend_price or 0 }}"
+          data-cur-price="{{ r.current_price or 0 }}"
+          data-change="{{ r.change_percent or 0 }}">
+        <td class="row-index">{{ loop.index }}</td>
+        <td class="font-monospace">{{ r.stock_code }}</td>
+        <td>{{ r.stock_name }}</td>
+        <td>
+          {% if hcnt >= 2 %}
+            <span class="badge bg-info" title="近7天系统推荐过 {{ hcnt }} 次">连续{{ hcnt }}次</span>
+          {% elif hcnt == 1 %}
+            <span class="badge bg-light text-dark border" title="首次系统推荐">首次</span>
+          {% else %}
+            <span class="text-muted small">-</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.recommend_price is not none %}
+            <span class="js-editable-price" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.recommend_price) }}" title="点击修改成本价">{{ '%.2f'|format(r.recommend_price) }}</span>
+          {% elif r.reference_close is not none %}
+            <span class="text-muted">~{{ '%.2f'|format(r.reference_close) }}</span>
+          {% else %}-{% endif %}
+        </td>
+        <td class="text-end">{% if r.current_price is not none %}<span class="js-editable-curprice" data-rec-id="{{ r.id }}" data-price="{{ '%.2f'|format(r.current_price) }}" title="点击修改现价">{{ '%.2f'|format(r.current_price) }}</span>{% else %}-{% endif %}</td>
+        <td class="text-end js-change-cell {% if (r.change_percent or 0) > 0 %}text-up{% elif (r.change_percent or 0) < 0 %}text-down{% endif %}">
+          {% if r.change_percent is not none %}{{ '%.2f'|format(r.change_percent * 100) }}%{% else %}-{% endif %}
+        </td>
+        <td class="text-end">
+          {% if r.shares and r.shares > 0 %}
+            <span class="js-editable-shares" data-rec-id="{{ r.id }}" data-shares="{{ r.shares }}" title="点击修改股数">{{ r.shares }}</span>
+          {% else %}
+            <span class="js-editable-shares text-muted" data-rec-id="{{ r.id }}" data-shares="0" title="点击填写股数">-</span>
+          {% endif %}
+        </td>
+        <td class="text-end fw-bold js-pnl-cell {% if (r.pnl_amount or 0) > 0 %}text-up{% elif (r.pnl_amount or 0) < 0 %}text-down{% endif %}">
+          {% if r.pnl_amount is defined and r.pnl_amount != 0 %}{{ '%+.2f'|format(r.pnl_amount) }}{% else %}-{% endif %}
+        </td>
+        <td>
+          {% if r.price_status == 'pending' %}
+            <span class="badge bg-warning text-dark">待开盘</span>
+          {% elif r.price_status == 'void' %}
+            <span class="badge bg-secondary">已作废</span>
+          {% else %}
+            <span class="badge bg-success">已成交</span>
+          {% endif %}
+        </td>
+        <td>{% include "_signal_badge.html" with context %}</td>
+        <td class="text-end fw-bold score-cell">
+          {% if r.recommend_reason and r.recommend_reason.total_score is defined %}
+            {{ '%.1f'|format(r.recommend_reason.total_score) }}
+          {% else %}-{% endif %}
+        </td>
+        <td class="small text-muted">
+          {% if r.recommend_reason %}
+            趋势 {{ '%.1f'|format(r.recommend_reason.trend_strength or 0) }}
+            · 平滑 {{ '%.1f'|format(r.recommend_reason.trend_smooth or 0) }}
+            · 量能 {{ '%.1f'|format(r.recommend_reason.volume_factor or 0) }}
+            · 位置 {{ '%.1f'|format(r.recommend_reason.position or 0) }}
+            <br>
+            <span class="text-secondary">
+              60日 {{ '%.1f'|format(r.recommend_reason.ret_60 or 0) }}%
+              · 波动 {{ '%.2f'|format(r.recommend_reason.vol_std or 0) }}%
+              · 距高点 {{ '%.1f'|format(r.recommend_reason.dist_high60 or 0) }}%
+              · 量比 {{ '%.2f'|format(r.recommend_reason.vol_ratio_5_20 or 0) }}
+            </span>
+          {% endif %}
+        </td>
+        <td class="text-center">
+          <button class="btn btn-sm js-watch-toggle {% if r.is_watched %}btn-warning{% else %}btn-outline-secondary{% endif %}"
+                  data-rec-id="{{ r.id }}"
+                  data-watched="{{ '1' if r.is_watched else '0' }}">
+            {% if r.is_watched %}★{% else %}☆{% endif %}
+          </button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">暂无推荐数据。点击右上角 <b>手动选股</b> 立即生成。</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── 大盘状态 ──
+(async function loadMarketStatus() {
+  const bar = document.getElementById('market-status-bar');
+  if (!bar) return;
+  try {
+    const resp = await fetch('/api/market_status');
+    const data = await resp.json();
+    if (data.sh300 && data.ma60) {
+      const above = data.status === 'above';
+      bar.className = 'alert mb-3 py-2 px-3 d-flex align-items-center gap-3 ' +
+        (above ? 'alert-success' : 'alert-danger');
+      bar.style.borderRadius = '10px';
+      bar.innerHTML = [
+        '<span class="fw-bold">' + (above ? '🟢' : '🔴') + ' 沪深300 ' + data.sh300.toFixed(0) + '</span>',
+        '<span class="text-muted">|</span>',
+        '<span>MA60: ' + data.ma60.toFixed(0) + '</span>',
+        '<span class="text-muted">|</span>',
+        '<span class="fw-bold ' + (above ? 'text-up' : 'text-down') + '">' + (above ? '高于' : '低于') + '均线 ' + Math.abs(data.diff_pct).toFixed(1) + '%</span>',
+        '<span class="text-muted">|</span>',
+        '<span class="small">' + (above ? '✅ 市场可操作' : '⚠️ 建议空仓观望') + '</span>',
+        data.change_pct !== undefined ? '<span class="ms-auto small ' + (data.change_pct >= 0 ? 'text-up' : 'text-down') + '">' + (data.change_pct>=0?'+':'') + data.change_pct.toFixed(2) + '%</span>' : ''
+      ].join(' ');
+    } else if (data.sh300) {
+      bar.className = 'alert alert-warning mb-3 py-2 px-3';
+      bar.style.borderRadius = '10px';
+      bar.innerHTML = '<span>🟡 沪深300 ' + data.sh300.toFixed(0) + ' · MA60 数据暂不可用</span>';
+    } else {
+      bar.className = 'alert alert-secondary mb-3 py-2 px-3';
+      bar.innerHTML = '<span class="small">大盘状态暂不可用（非交易时段）</span>';
+    }
+  } catch (e) {
+    bar.className = 'alert alert-secondary mb-3 py-2 px-3';
+    bar.innerHTML = '<span class="small">大盘状态加载失败</span>';
+  }
+})();
+
+// ── 表格排序/筛选（含历史连续性筛选）──
+(function () {
+  const tbody = document.querySelector('#rec-table tbody');
+  if (!tbody) return;
+
+  const rows = Array.from(tbody.querySelectorAll('tr[data-rec-id]'));
+  const filterCount = document.getElementById('filter-count');
+
+  let sortCol = 'score';
+  let sortAsc = false;
+
+  function parseVal(row, col) {
+    switch (col) {
+      case 'score': return parseFloat(row.dataset.score) || 0;
+      case 'change': return parseFloat(row.dataset.change) || 0;
+      case 'rec_price': return parseFloat(row.dataset.recPrice) || 0;
+      case 'cur_price': return parseFloat(row.dataset.curPrice) || 0;
+      case 'code': return row.dataset.code || '';
+      case 'name': return row.dataset.name || '';
+      default: return 0;
+    }
+  }
+
+  function sortRows() {
+    rows.sort((a, b) => {
+      const va = parseVal(a, sortCol), vb = parseVal(b, sortCol);
+      if (typeof va === 'string') return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sortAsc ? va - vb : vb - va;
+    });
+    rows.forEach((r, i) => { r.querySelector('.row-index').textContent = i + 1; tbody.appendChild(r); });
+    updateArrows();
+  }
+
+  function updateArrows() {
+    document.querySelectorAll('#rec-table .sortable').forEach(th => {
+      const col = th.dataset.sort;
+      const arrow = th.querySelector('.sort-arrow');
+      if (col === sortCol) { arrow.textContent = sortAsc ? ' ▲' : ' ▼'; th.classList.add('sorted'); }
+      else { arrow.textContent = ''; th.classList.remove('sorted'); }
+    });
+  }
+
+  document.querySelectorAll('#rec-table .sortable').forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.sort;
+      sortCol === col ? sortAsc = !sortAsc : (sortCol = col, sortAsc = !(th.dataset.defaultDesc === 'true'));
+      sortRows(); applyFilters();
+    });
+  });
+
+  function applyFilters() {
+    const minScore = parseFloat(document.getElementById('filter-score').value) || 0;
+    const signal = document.getElementById('filter-signal').value;
+    const history = document.getElementById('filter-history').value;
+    const search = document.getElementById('filter-search').value.trim().toLowerCase();
+    let visible = 0;
+    rows.forEach(r => {
+      const score = parseFloat(r.dataset.score) || 0;
+      const sig = r.dataset.signal || '';
+      const hcnt = parseInt(r.dataset.historyCount) || 0;
+      const code = (r.dataset.code || '').toLowerCase();
+      const name = (r.dataset.name || '').toLowerCase();
+      let show = true;
+      if (score < minScore) show = false;
+      if (signal && sig !== signal) show = false;
+      if (history === '2' && hcnt < 2) show = false;
+      if (history === '1' && hcnt !== 1) show = false;
+      if (history === '0' && hcnt !== 0) show = false;
+      if (search && !code.includes(search) && !name.includes(search)) show = false;
+      r.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    let idx = 0;
+    rows.forEach(r => { if (r.style.display !== 'none') { r.querySelector('.row-index').textContent = ++idx; } });
+    filterCount.textContent = '显示 ' + visible + ' / ' + rows.length + ' 条';
+  }
+
+  ['filter-score', 'filter-signal', 'filter-history', 'filter-search'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener(id === 'filter-search' ? 'input' : 'change', applyFilters);
+    if (el && el.type === 'number') el.addEventListener('input', applyFilters);
+  });
+
+  document.getElementById('btn-reset-filter').addEventListener('click', () => {
+    document.getElementById('filter-score').value = '';
+    document.getElementById('filter-signal').value = '';
+    document.getElementById('filter-history').value = '';
+    document.getElementById('filter-search').value = '';
+    applyFilters();
+  });
+
+  sortRows(); applyFilters();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}板块资金流 — 股票推荐平台{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>💰 板块资金流向</h2>
+  <div>
+    <a href="{{ url_for('etf.overview') }}" class="btn btn-outline-primary btn-sm">📊 ETF 基金池</a>
+  </div>
+</div>
+{% if flow_date %}
+<p class="text-muted">数据日期：{{ flow_date }}</p>
+{% endif %}
+
+<div class="row g-4">
+  <!-- 主力净流入 TOP 15 -->
+  <div class="col-md-6">
+    <div class="card border-danger">
+      <div class="card-header bg-danger text-white">
+        <strong>🔴 主力净流入 TOP 15</strong>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr><th>#</th><th>板块</th><th>涨跌幅</th><th>主力净流入(亿)</th></tr>
+          </thead>
+          <tbody>
+            {% for f in top_inflow %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>{{ f.name }}</td>
+              <td>
+                <span class="{% if f.change_pct and f.change_pct > 0 %}text-danger{% else %}text-success{% endif %}">
+                  {{ "%+.2f"|format(f.change_pct) if f.change_pct else "-" }}%
+                </span>
+              </td>
+              <td class="text-danger fw-bold">{{ "%+.2f"|format(f.main_net_inflow / 100000000) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- 主力净流出 TOP 15 -->
+  <div class="col-md-6">
+    <div class="card border-success">
+      <div class="card-header bg-success text-white">
+        <strong>🟢 主力净流出 TOP 15</strong>
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+          <thead>
+            <tr><th>#</th><th>板块</th><th>涨跌幅</th><th>主力净流入(亿)</th></tr>
+          </thead>
+          <tbody>
+            {% for f in top_outflow %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td>{{ f.name }}</td>
+              <td>
+                <span class="{% if f.change_pct and f.change_pct > 0 %}text-danger{% else %}text-success{% endif %}">
+                  {{ "%+.2f"|format(f.change_pct) if f.change_pct else "-" }}%
+                </span>
+              </td>
+              <td class="text-success fw-bold">{{ "%+.2f"|format(f.main_net_inflow / 100000000) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr>
+<div class="text-muted small">
+  📡 数据源：东方财富板块资金流 · 主力净流入 = 超大单 + 大单
+</div>
+{% endblock %}

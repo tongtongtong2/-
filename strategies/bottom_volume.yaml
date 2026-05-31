@@ -1,0 +1,14 @@
+# 底部放量策略
+name: bottom_volume
+display_name: 底部放量
+description: 从高点跌15%+后，出现放量阳线企稳。潜在反转信号，风险较高。
+category: reversal
+weight: 0.6
+conditions:
+  prior_decline: "从60日高点下跌 > 15%"
+  volume_spike: "今日成交量 > 5日均量的3倍"
+  bullish_candle: "今日收阳（收盘 > 开盘）"
+  holding_support: "价格守住近期低点"
+risk_level: high
+position_size: "2-3成仓位"
+score_bonus: 8

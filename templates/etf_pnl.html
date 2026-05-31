@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}ETF 盈亏分析{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2>📈 ETF 盈亏分析</h2>
+  <div>
+    <a href="{{ url_for('etf.overview') }}" class="btn btn-outline-primary btn-sm">📊 基金池</a>
+    <a href="{{ url_for('etf.ranking') }}" class="btn btn-outline-warning btn-sm">🎯 智能选基</a>
+  </div>
+</div>
+
+<!-- 汇总卡片 -->
+<div class="row g-3 mb-4">
+  <div class="col-md-2">
+    <div class="card text-bg-primary"><div class="card-body text-center">
+      <h5>{{ summary.total_trades }}</h5><small>总交易次数</small>
+    </div></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-bg-success"><div class="card-body text-center">
+      <h5>{{ summary.win_count }}</h5><small>盈利次数</small>
+    </div></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-bg-danger"><div class="card-body text-center">
+      <h5>{{ summary.loss_count }}</h5><small>亏损次数</small>
+    </div></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-bg-info"><div class="card-body text-center">
+      <h5>{{ summary.win_rate }}%</h5><small>胜率</small>
+    </div></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-bg-warning"><div class="card-body text-center">
+      <h5>{{ "%+.1f"|format(summary.total_pnl_pct) }}%</h5><small>累计盈亏</small>
+    </div></div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-bg-secondary"><div class="card-body text-center">
+      <h5>{{ summary.holding_count }}</h5><small>当前持仓</small>
+    </div></div>
+  </div>
+</div>
+
+<!-- 交易记录 -->
+<h5>📋 虚拟交易记录</h5>
+{% if trades %}
+<div class="table-responsive">
+  <table class="table table-hover table-sm">
+    <thead class="table-dark">
+      <tr>
+        <th>代码</th><th>名称</th><th>入场日期</th><th>出场日期</th>
+        <th>盈亏</th><th>状态</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in trades %}
+      <tr>
+        <td><code>{{ t.code }}</code></td>
+        <td>{{ t.name }}</td>
+        <td>{{ t.entry_date }}</td>
+        <td>{{ t.exit_date or '—' }}</td>
+        <td>
+          {% if t.pnl_pct is not none %}
+            <span class="{% if t.pnl_pct > 0 %}text-danger{% else %}text-success{% endif %} fw-bold">
+              {{ "%+.2f"|format(t.pnl_pct * 100) if t.pnl_pct < 1 else "%+.2f"|format(t.pnl_pct) }}%
+            </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if t.status %}
+            <span class="badge bg-primary">{{ t.status }}</span>
+          {% elif t.pnl_pct and t.pnl_pct > 0 %}
+            <span class="badge bg-success">盈利</span>
+          {% elif t.pnl_pct %}
+            <span class="badge bg-danger">亏损</span>
+          {% else %}
+            <span class="badge bg-secondary">平</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="alert alert-info">暂无虚拟交易记录。运行 <code>python main.py run</code> 生成每日建议后自动重建。</div>
+{% endif %}
+
+<hr>
+<div class="text-muted small">
+  📡 虚拟交易基于历史 operation_advice 记录重建 · 以 advice 生成日收盘价作为虚拟成交价
+</div>
+{% endblock %}
