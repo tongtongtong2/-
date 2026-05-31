@@ -1,0 +1,62 @@
+{% extends "etf_base.html" %}{% set nav = 'stocks' %}
+{% block title %}个股精选 · 多因子价值选股{% endblock %}
+{% block content %}
+
+<h4 class="mb-3">📈 多因子价值选股 TOP50 <span class="text-muted fs-6">(1749只中，跳过金融股)</span></h4>
+<div class="text-muted small mb-3">价值40%+质量30%+安全20%+动量10% · 行业中性 · 最近4季财务均值 · 利润增速封顶防假利润</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">全市场</div><div class="stat-value">{{ summary.total_stocks }}</div><div class="small text-muted">只</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">TOP50平均评分</div>
+    <div class="stat-value text-up">{{ '%+.2f'|format(top[:50]|sum(attribute='score')/top[:50]|length) if top else 0 }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">热门行业</div><div class="small">
+      {% for ind, cnt in summary.top_industries[:4] %}
+      <span class="badge bg-light text-dark me-1">{{ ind }}({{ cnt }})</span>
+      {% endfor %}
+    </div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">自选股</div><div class="small">
+      {% for w in summary.watchlist[:4] %}
+      <span class="badge {% if w.pct<=20 %}bg-success{% elif w.pct<=50 %}bg-warning text-dark{% else %}bg-danger{% endif %} me-1">{{ w.name }}(前{{ w.pct|int }}%)</span>
+      {% endfor %}
+    </div>
+  </div></div></div>
+</div>
+
+<div class="table-responsive">
+<table class="table table-hover align-middle bg-white rounded-3">
+  <thead class="table-light"><tr>
+    <th>#</th><th>代码</th><th>名称</th><th>行业</th><th class="text-end">总分</th><th class="text-end">价值</th><th class="text-end">质量</th><th class="text-end">安全</th><th class="text-end">动量</th><th class="text-end">ROE%</th><th class="text-end">PE</th><th class="text-end">负债%</th>
+  </tr></thead>
+  <tbody>
+  {% for s in top %}
+  <tr {% if s.rank<=5 %}class="table-warning"{% endif %}>
+    <td class="text-muted">{{ s.rank }}</td>
+    <td class="font-monospace fw-bold">{{ s.code }}</td>
+    <td>{{ s.name }}</td>
+    <td><span class="badge bg-light text-dark">{{ s.industry }}</span></td>
+    <td class="text-end fw-bold {% if s.score>1.5 %}text-up{% endif %}">{{ '%+.2f'|format(s.score) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.value) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.quality) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.safety) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.momentum) }}</td>
+    <td class="text-end {% if s.roe>=15 %}text-up{% elif s.roe<5 %}text-down{% endif %}">{{ '%.1f'|format(s.roe) }}</td>
+    <td class="text-end">{{ '%.1f'|format(s.pe) if s.pe else '-' }}</td>
+    <td class="text-end">{{ '%.1f'|format(s.debt) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<div class="alert alert-warning small mt-3">
+  ⚠ 排名靠前可能是非经常性损益拉高利润增速（如通化东宝+3006%），请人工核实。银行/券商已自动跳过。
+</div>
+
+{% endblock %}

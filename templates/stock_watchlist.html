@@ -1,0 +1,41 @@
+{% extends "etf_base.html" %}{% set nav = 'stocks' %}
+{% block title %}自选池排名 · 多因子选股{% endblock %}
+{% block content %}
+
+<h4 class="mb-3">⭐ 自选股在 {{ total }} 只中的位置</h4>
+
+<div class="table-responsive">
+<table class="table table-hover align-middle bg-white rounded-3">
+  <thead class="table-light"><tr>
+    <th>排名</th><th>代码</th><th>名称</th><th class="text-end">分位数</th><th class="text-end">总分</th><th class="text-end">价值</th><th class="text-end">质量</th><th class="text-end">安全</th><th class="text-end">动量</th><th class="text-end">ROE%</th><th class="text-end">PE</th>
+  </tr></thead>
+  <tbody>
+  {% for s in watch %}
+  <tr>
+    <td class="font-monospace text-muted">#{{ s.rank }}</td>
+    <td class="font-monospace fw-bold">{{ s.code }}</td>
+    <td class="fw-bold">{{ s.name }}</td>
+    <td class="text-end">
+      <span class="badge {% if s.pct<=10 %}bg-success{% elif s.pct<=30 %}bg-info text-dark{% elif s.pct<=60 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
+        前{{ s.pct|int }}%
+      </span>
+      {% if s.pct<=10 %}🏆{% endif %}
+    </td>
+    <td class="text-end fw-bold">{{ '%+.2f'|format(s.score) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.value) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.quality) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.safety) }}</td>
+    <td class="text-end">{{ '%+.2f'|format(s.momentum) }}</td>
+    <td class="text-end {% if s.roe>=15 %}text-up{% elif s.roe<5 %}text-down{% endif %}">{{ '%.1f'|format(s.roe) }}</td>
+    <td class="text-end">{{ '%.1f'|format(s.pe) if s.pe else '-' }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<small class="text-muted">
+  前10%=🏆优质 · 前30%=良好 · 前60%=中等 · 后40%=排名靠后。模型偏好ROE高+PE低+低负债，银行和大盘价值股天然吃亏。
+</small>
+
+{% endblock %}

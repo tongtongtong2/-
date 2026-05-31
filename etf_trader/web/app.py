@@ -10,10 +10,14 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = 'etf-bollinger-2026'
 
 from web.etf_engine import ETFEngine
+from web.stock_engine import StockEngine
 
 
 def engine():
     return ETFEngine()
+
+def stock_engine():
+    return StockEngine()
 
 
 @app.route('/')
@@ -52,3 +56,25 @@ def api_signals():
     eng = engine()
     return jsonify({'date': eng.latest_date(), 'signals': eng.get_signals_raw(),
                     'market': eng.get_market()})
+
+
+# === 个股 ===
+@app.route('/stocks')
+def stocks_page():
+    eng = stock_engine()
+    top = eng.get_top(50)
+    summary = eng.get_summary()
+    return render_template('stock_home.html', nav='stocks',
+                           top=top, summary=summary)
+
+@app.route('/stocks/watchlist')
+def stocks_watchlist():
+    eng = stock_engine()
+    watch = eng.get_watchlist()
+    return render_template('stock_watchlist.html', nav='stocks',
+                           watch=watch, total=eng.get_summary()['total_stocks'])
+
+@app.route('/api/stocks')
+def api_stocks():
+    eng = stock_engine()
+    return jsonify({'top': eng.get_top(30), 'watchlist': eng.get_watchlist()})
