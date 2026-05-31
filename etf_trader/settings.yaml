@@ -1,0 +1,143 @@
+etf_list:
+- symbol: '159711'
+  name: 港股通50ETF华夏
+  category: equity
+- symbol: '159718'
+  name: 港股医药ETF平安
+  category: equity
+- symbol: '159751'
+  name: 港股通科技ETF鹏华
+  category: equity
+- symbol: '159605'
+  name: 中概互联ETF广发
+  category: equity
+- symbol: '159607'
+  name: 中概互联网ETF嘉实
+  category: equity
+- symbol: '159726'
+  name: 港股通高股息ETF华夏
+  category: equity
+- symbol: '159712'
+  name: 港股通50ETF国泰
+  category: equity
+- symbol: '159892'
+  name: 恒生医药ETF华夏
+  category: equity
+- symbol: '159792'
+  name: 港股通互联网ETF富国
+  category: equity
+- symbol: '513590'
+  name: 港股通消费ETF鹏华
+  category: equity
+- symbol: '513700'
+  name: 港股通医药ETF鹏华
+  category: equity
+- symbol: '513180'
+  name: 恒生科技ETF华夏
+  category: equity
+- symbol: '513100'
+  name: 纳指ETF国泰
+  category: equity
+- symbol: '562500'
+  name: 机器人ETF华夏
+  category: equity
+- symbol: '159949'
+  name: 创业板50ETF华安
+  category: equity
+- symbol: '515700'
+  name: 新能源车ETF平安
+  category: equity
+- symbol: '159755'
+  name: 电池ETF广发
+  category: equity
+- symbol: '561700'
+  name: 电力ETF广发
+  category: equity
+- symbol: '515790'
+  name: 光伏ETF华泰柏瑞
+  category: equity
+- symbol: '515880'
+  name: 通信ETF华夏
+  category: equity
+- symbol: '159996'
+  name: 家电ETF国泰
+  category: equity
+- symbol: '516880'
+  name: 光伏ETF银华
+  category: equity
+database:
+  driver: mysql
+strategy:
+  type: multi_indicator_scoring
+  params:
+    ma_short: 20
+    ma_long: 60
+    weights:
+      trend: 0.35
+      macd: 0.25
+      rsi: 0.15
+      bb: 0.25
+    thresholds:
+      buy: 50
+      sell: -50
+    cooldown_days: 5
+risk_control:
+  rules:
+  - type: stop_loss
+    params:
+      threshold: -0.08
+  - type: trailing_stop
+    params:
+      profit_threshold: 0.1
+      drawdown_threshold: 0.03
+market:
+  indices:
+  - code: '000001'
+    name: 上证指数
+    baostock_code: sh.000001
+    akshare_symbol: sh000001
+    source: baostock
+    weight: 1.0
+  - code: '000300'
+    name: 沪深300
+    baostock_code: sh.000300
+    akshare_symbol: sh000300
+    source: baostock
+    weight: 1.0
+  - code: 000905
+    name: 中证500
+    baostock_code: sh.000905
+    akshare_symbol: sh000905
+    source: baostock
+    weight: 1.0
+  - code: 000852
+    name: 中证1000
+    baostock_code: sh.000852
+    akshare_symbol: sh000852
+    source: baostock
+    weight: 1.0
+  - code: '399006'
+    name: 创业板指
+    baostock_code: sz.399006
+    akshare_symbol: sz399006
+    source: baostock
+    weight: 1.0
+  - code: 000688
+    name: 科创50
+    baostock_code: sh.000688
+    akshare_symbol: sh000688
+    source: akshare
+    weight: 1.0
+  regime:
+    enabled: true
+    lookback_days: 180
+    min_indices: 4
+    hot_score: 0.55
+    cold_score: -0.55
+    hot_ratio: 0.5
+    cold_ratio: 0.5
+data:
+  lookback_days: 1500
+scheduler:
+  run_time: 07:00
+  timezone: Asia/Shanghai
