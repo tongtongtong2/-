@@ -1,0 +1,56 @@
+{% set nav = nav or '' %}
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ETF 布林带轮动{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css">
+  <style>
+    body { background: #f5f7fa; font-size: 14px; }
+    .navbar-brand { font-weight: 700; }
+    .card { border-radius: 12px; border: none; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .stat-value { font-size: 28px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: #888; text-transform: uppercase; }
+    .text-up { color: #e15241; }
+    .text-down { color: #22ab94; }
+    .action-BUY { background: #e15241; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+    .action-WATCH { background: #f0ad4e; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+    .action-HOLD { background: #5bc0de; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+    .action-AVOID,.action-SELL { background: #999; color: #fff; padding: 2px 10px; border-radius: 20px; font-size: 12px; }
+    .bb-bar { height: 6px; border-radius: 3px; background: #e9ecef; position: relative; }
+    .bb-fill { height: 100%; border-radius: 3px; position: absolute; }
+    .bb-marker { width: 12px; height: 12px; border-radius: 50%; position: absolute; top: -3px; margin-left: -6px; border: 2px solid #333; background: #fff; }
+    .score-high { color: #e15241; font-weight: 700; }
+    .score-mid { color: #f0ad4e; font-weight: 700; }
+    .score-low { color: #22ab94; font-weight: 700; }
+  </style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="/">📊 ETF 布林轮动</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMain">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navMain">
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link {% if nav=='etf_home' %}active{% endif %}" href="/">今日信号</a></li>
+        <li class="nav-item"><a class="nav-link {% if nav=='etf_signals' %}active{% endif %}" href="/signals">全部排名</a></li>
+        <li class="nav-item"><a class="nav-link {% if nav=='etf_history' %}active{% endif %}" href="/history">历史</a></li>
+        <li class="nav-item"><a class="nav-link {% if nav=='etf_stats' %}active{% endif %}" href="/statistics">统计</a></li>
+      </ul>
+      <span class="navbar-text small text-warning">仅供研究，不构成投资建议</span>
+    </div>
+  </div>
+</nav>
+
+<main class="container-fluid py-4">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.bootcdn.net/ajax/libs/twitter-bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.bootcdn.net/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

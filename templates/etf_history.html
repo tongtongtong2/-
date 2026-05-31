@@ -1,0 +1,57 @@
+{% extends "etf_base.html" %}{% set nav = 'etf_history' %}
+{% block title %}历史信号 · ETF 布林轮动{% endblock %}
+{% block content %}
+
+<h4 class="mb-3">📅 近 {{ days }} 天信号趋势</h4>
+
+<div class="card mb-4"><div class="card-body">
+  <canvas id="historyChart" height="80"></canvas>
+</div></div>
+
+<div class="table-responsive">
+<table class="table table-sm table-hover align-middle bg-white rounded-3">
+  <thead class="table-light"><tr>
+    <th>日期</th><th>ETF数</th><th>买入数</th><th>平均评分</th><th>信号活跃度</th>
+  </tr></thead>
+  <tbody>
+  {% for h in history %}
+  <tr>
+    <td class="font-monospace">{{ h.date }}</td>
+    <td>{{ h.total }}</td>
+    <td><span class="fw-bold {% if h.buy_cnt>0 %}text-up{% endif %}">{{ h.buy_cnt }}</span></td>
+    <td>{{ '%+.1f'|format(h.avg_score) }}</td>
+    <td>
+      <div class="progress" style="height:6px;width:100px"><div class="progress-bar {% if h.buy_cnt>2 %}bg-danger{% elif h.buy_cnt>0 %}bg-warning{% else %}bg-secondary{% endif %}" style="width:{{ (h.buy_cnt/5*100)|int if h.buy_cnt<=5 else 100 }}%"></div></div>
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<small class="text-muted">买入数 = 当日评分≥50的ETF数量。越多说明机会越多。</small>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const data = {{ history|tojson }};
+new Chart(document.getElementById('historyChart'), {
+  type: 'line',
+  data: {
+    labels: data.map(d => d.date.slice(5)),
+    datasets: [
+      { label: '买入数', data: data.map(d => d.buy_cnt), borderColor: '#e15241', tension: 0.3, yAxisID: 'y' },
+      { label: '平均评分', data: data.map(d => d.avg_score), borderColor: '#5bc0de', tension: 0.3, yAxisID: 'y1' },
+    ]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { position: 'top' } },
+    scales: {
+      y: { type: 'linear', position: 'left', title: { display: true, text: '买入数' }, min: 0 },
+      y1: { type: 'linear', position: 'right', title: { display: true, text: '平均评分' }, grid: { drawOnChartArea: false } },
+    }
+  }
+});
+</script>
+{% endblock %}

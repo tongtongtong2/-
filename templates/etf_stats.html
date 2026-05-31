@@ -1,0 +1,60 @@
+{% extends "etf_base.html" %}{% set nav = 'etf_stats' %}
+{% block title %}策略统计 · ETF 布林轮动{% endblock %}
+{% block content %}
+
+<h4 class="mb-3">📈 策略统计 · {{ stats.date }}</h4>
+
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">ETF总数</div><div class="stat-value">{{ stats.total_etfs }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">🟢 买入信号</div><div class="stat-value text-up">{{ stats.buy_count }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">👀 关注</div><div class="stat-value" style="color:#f0ad4e">{{ stats.watch_count }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">平均评分</div>
+    <div class="stat-value {% if stats.avg_score>10 %}text-up{% else %}text-down{% endif %}">{{ '%+.0f'|format(stats.avg_score) }}</div>
+  </div></div></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">强看多(≥50)</div><div class="stat-value text-up">{{ stats.strong_count }}</div>
+  </div></div></div>
+  <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">弱/空(<-30)</div><div class="stat-value text-down">{{ stats.weak_count }}</div>
+  </div></div></div>
+  <div class="col-md-4"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">多空比</div>
+    <div class="stat-value">{{ '%.1f'|format(stats.strong_count/(stats.weak_count+0.01)) }}:1</div>
+  </div></div></div>
+</div>
+
+<div class="card mt-4"><div class="card-body">
+  <h6>近30天买入信号趋势</h6>
+  <canvas id="trendChart" height="60"></canvas>
+</div></div>
+
+<small class="text-muted mt-3 d-block">数据来源：MySQL etf_trader · 评分为主+布林过滤 · 每交易日更新</small>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const history = {{ stats.history|tojson }};
+new Chart(document.getElementById('trendChart'), {
+  type: 'bar',
+  data: {
+    labels: history.map(d => d.date.slice(5)),
+    datasets: [{ label: '买入信号数', data: history.map(d => d.buy_cnt), backgroundColor: '#e1524166', borderColor: '#e15241', borderWidth: 1 }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } }
+  }
+});
+</script>
+{% endblock %}
