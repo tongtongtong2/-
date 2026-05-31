@@ -1,0 +1,144 @@
+{% extends "etf_base.html" %}{% set nav = 'portfolio' %}
+{% block title %}我的持仓 · ETF/个股{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h4 class="mb-1">💰 我的持仓</h4>
+    <div class="text-muted small">每日自动刷新最新价 · 点击价格可修改</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-primary btn-sm" onclick="refreshPrices()">🔄 刷新价格</button>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addModal">+ 添加持仓</button>
+  </div>
+</div>
+
+{# 汇总 #}
+<div class="row g-3 mb-4" id="summary-row">
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">持仓数</div><div class="stat-value">{{ summary.count }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">总成本</div><div class="stat-value">{{ '%.0f'|format(summary.total_cost) }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">总市值</div><div class="stat-value">{{ '%.0f'|format(summary.total_val) }}</div>
+  </div></div></div>
+  <div class="col-6 col-md-3"><div class="card stat-card"><div class="card-body text-center">
+    <div class="stat-label">总盈亏</div>
+    <div class="stat-value {% if summary.total_pnl>=0 %}text-up{% else %}text-down{% endif %}">
+      {{ '%+.0f'|format(summary.total_pnl) }} <small class="fs-6">({{ '%+.1f'|format(summary.total_pnl_pct) }}%)</small>
+    </div>
+  </div></div></div>
+</div>
+
+{# 持仓列表 #}
+{% if summary.holdings %}
+<div class="table-responsive">
+<table class="table table-hover align-middle bg-white rounded-3">
+  <thead class="table-light"><tr>
+    <th>代码</th><th>名称</th><th class="text-end">成本价</th><th class="text-end">现价</th><th class="text-end">股数</th><th class="text-end">成本</th><th class="text-end">市值</th><th class="text-end">盈亏</th><th class="text-end">盈亏%</th><th>买入日</th><th>操作</th>
+  </tr></thead>
+  <tbody id="holdings-tbody">
+  {% for h in summary.holdings %}
+  <tr id="row-{{ h.code }}">
+    <td class="font-monospace fw-bold">{{ h.code }}</td>
+    <td>{{ h.name }}</td>
+    <td class="text-end editable" data-code="{{ h.code }}" data-field="buy_price" title="点击修改成本价">{{ '%.3f'|format(h.buy_price) }}</td>
+    <td class="text-end {% if h.current_price>h.buy_price %}text-up{% elif h.current_price<h.buy_price %}text-down{% endif %}" title="{{ h.updated_at }}更新">
+      {{ '%.3f'|format(h.current_price) if h.current_price else '-' }}
+    </td>
+    <td class="text-end editable" data-code="{{ h.code }}" data-field="shares" title="点击修改股数">{{ h.shares }}</td>
+    <td class="text-end">{{ '%.0f'|format(h.cost) }}</td>
+    <td class="text-end">{{ '%.0f'|format(h.market_val) }}</td>
+    <td class="text-end fw-bold {% if h.pnl>=0 %}text-up{% else %}text-down{% endif %}">{{ '%+.0f'|format(h.pnl) }}</td>
+    <td class="text-end fw-bold {% if h.pnl_pct>=0 %}text-up{% else %}text-down{% endif %}">{{ '%+.1f'|format(h.pnl_pct) }}%</td>
+    <td class="small">{{ h.buy_date }}</td>
+    <td><button class="btn btn-sm btn-outline-danger" onclick="removeHolding('{{ h.code }}')">卖出</button></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="alert alert-light text-muted text-center py-5">
+  <h5>暂无持仓</h5>
+  <p>点击「+ 添加持仓」开始记录你的投资</p>
+</div>
+{% endif %}
+
+{# 添加弹窗 #}
+<div class="modal fade" id="addModal" tabindex="-1">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">添加持仓</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+      <div class="mb-3"><label class="form-label">代码</label><input class="form-control" id="add-code" placeholder="601985 或 513100"></div>
+      <div class="mb-3"><label class="form-label">名称</label><input class="form-control" id="add-name" placeholder="可选，留空自动填充"></div>
+      <div class="row g-2 mb-3">
+        <div class="col"><label class="form-label">买入价</label><input class="form-control" type="number" step="0.001" id="add-price" placeholder="0.000"></div>
+        <div class="col"><label class="form-label">股数</label><input class="form-control" type="number" id="add-shares" placeholder="100"></div>
+      </div>
+      <div class="mb-3"><label class="form-label">买入日期</label><input class="form-control" type="date" id="add-date"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+      <button class="btn btn-primary" onclick="addHolding()">确认添加</button>
+    </div>
+  </div></div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script>
+// 价格/股数点击修改
+document.querySelectorAll('.editable').forEach(el => {
+  el.style.cursor = 'pointer';
+  el.addEventListener('click', async () => {
+    const code = el.dataset.code;
+    const field = el.dataset.field;
+    const cur = el.textContent.trim();
+    const val = prompt(`${field === 'buy_price' ? '修改成本价' : '修改股数'} (${code}):`, cur);
+    if (val === null) return;
+    const num = field === 'buy_price' ? parseFloat(val) : parseInt(val);
+    if (isNaN(num)) return alert('请输入数字');
+    const resp = await fetch('/api/portfolio/update', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({code, field, value: num})
+    });
+    if (resp.ok) location.reload();
+  });
+});
+
+// 添加持仓
+async function addHolding() {
+  const code = document.getElementById('add-code').value.trim();
+  const name = document.getElementById('add-name').value.trim();
+  const price = parseFloat(document.getElementById('add-price').value);
+  const shares = parseInt(document.getElementById('add-shares').value);
+  const buy_date = document.getElementById('add-date').value;
+  if (!code || !price || !shares) return alert('请填写代码、价格、股数');
+  const resp = await fetch('/api/portfolio/add', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({code, name, buy_price: price, shares, buy_date})
+  });
+  if (resp.ok) location.reload();
+}
+
+// 卖出=移除
+async function removeHolding(code) {
+  if (!confirm(`确认卖出/移出 ${code}？`)) return;
+  const resp = await fetch('/api/portfolio/remove', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({code})
+  });
+  if (resp.ok) location.reload();
+}
+
+// 刷新价格
+async function refreshPrices() {
+  const resp = await fetch('/api/portfolio/refresh', {method:'POST'});
+  const data = await resp.json();
+  if (data.ok) location.reload();
+}
+</script>
+{% endblock %}

@@ -11,6 +11,7 @@ app.config['SECRET_KEY'] = 'etf-bollinger-2026'
 
 from web.etf_engine import ETFEngine
 from web.stock_engine import StockEngine
+from web.portfolio_engine import PortfolioEngine
 
 
 def engine():
@@ -18,6 +19,9 @@ def engine():
 
 def stock_engine():
     return StockEngine()
+
+def port_engine():
+    return PortfolioEngine()
 
 
 @app.route('/')
@@ -78,3 +82,53 @@ def stocks_watchlist():
 def api_stocks():
     eng = stock_engine()
     return jsonify({'top': eng.get_top(30), 'watchlist': eng.get_watchlist()})
+
+
+# === 持仓管理 ===
+@app.route('/portfolio')
+def portfolio_page():
+    eng = port_engine()
+    eng.refresh_prices()
+    summary = eng.summary()
+    return render_template('portfolio.html', nav='portfolio', summary=summary)
+
+
+@app.route('/api/portfolio')
+def api_portfolio():
+    eng = port_engine()
+    eng.refresh_prices()
+    return jsonify(eng.summary())
+
+
+@app.route('/api/portfolio/add', methods=['POST'])
+def api_portfolio_add():
+    data = request.get_json()
+    eng = port_engine()
+    eng.add(data['code'], data.get('name', data['code']),
+             float(data['buy_price']), int(data['shares']),
+             data.get('buy_date'))
+    eng.refresh_prices()
+    return jsonify({'ok': True, 'summary': eng.summary()})
+
+
+@app.route('/api/portfolio/update', methods=['POST'])
+def api_portfolio_update():
+    data = request.get_json()
+    eng = port_engine()
+    eng.update(data['code'], data['field'], data['value'])
+    return jsonify({'ok': True})
+
+
+@app.route('/api/portfolio/remove', methods=['POST'])
+def api_portfolio_remove():
+    data = request.get_json()
+    eng = port_engine()
+    eng.remove(data['code'])
+    return jsonify({'ok': True, 'summary': eng.summary()})
+
+
+@app.route('/api/portfolio/refresh', methods=['POST'])
+def api_portfolio_refresh():
+    eng = port_engine()
+    n = eng.refresh_prices()
+    return jsonify({'ok': True, 'updated': n, 'summary': eng.summary()})
