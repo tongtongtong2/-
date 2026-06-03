@@ -69,6 +69,7 @@ database:
   driver: mysql
 strategy:
   type: multi_indicator_scoring
+  version: 2.1  # 2026-06-03: 买阈值50→35, 四道防线
   params:
     ma_short: 20
     ma_long: 60
@@ -78,9 +79,26 @@ strategy:
       rsi: 0.15
       bb: 0.25
     thresholds:
-      buy: 50
+      buy: 35     # v2.1: 50→35 提升灵敏度
       sell: -50
     cooldown_days: 5
+    trend_filter:
+      strict: false     # false: close>MA60即可, 不要求MA20严格向上
+    volume_filter:
+      min_ratio: 0.35   # 0.5→0.35 放宽缩量限制
+  defense_lines:
+    - name: 单日暴跌过滤
+      rule: 昨日跌幅 > 7% → AVOID
+      reason: 防天娱数科型飞刀
+    - name: 超买保护
+      rule: 20日涨幅 > 25% 且 布林位 > 70% → WATCH
+      reason: 防新疆众和型追顶
+    - name: 趋势确认
+      rule: 近5日跌幅 > 8% 或 连续3日加速下跌 → 过滤
+      reason: 防润建股份型崩盘股
+    - name: 缩量假反弹
+      rule: 5日量比 < 0.6 → WATCH
+      reason: 无量反弹不可靠
 risk_control:
   rules:
   - type: stop_loss
