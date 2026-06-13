@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}ETF Trader V2 — 信号{% endblock %}
+{% block content %}
+
+<h2>📡 完整信号列表</h2>
+<p class="text-muted">数据日期: {{ latest }} | 池子: {{ all_signals|length }}只</p>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>代码</th>
+            <th>名称</th>
+            <th>现价</th>
+            <th>评分</th>
+            <th>布林%</th>
+            <th>RSI</th>
+            <th>5日%</th>
+            <th>20日%</th>
+            <th>MA20</th>
+            <th>MA60</th>
+            <th>趋势</th>
+            <th>ATR%</th>
+            <th>操作</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in all_signals %}
+          <tr class="
+            {% if r.action == 'BUY' %}table-success
+            {% elif r.action == 'WATCH' %}table-warning
+            {% elif r.action in ('SELL', 'TAKE_PROFIT', 'STOP') %}table-danger
+            {% elif r.action == 'AVOID' %}table-secondary
+            {% endif %}
+          ">
+            <td><code>{{ r.code }}</code></td>
+            <td><strong>{{ r.name }}</strong></td>
+            <td>{{ "%.3f"|format(r.close) if r.close else '-' }}</td>
+            <td>
+              <span class="badge {% if r.score >= 50 %}bg-success{% elif r.score >= 30 %}bg-info{% elif r.score >= -30 %}bg-secondary{% elif r.score >= -70 %}bg-warning{% else %}bg-danger{% endif %}">
+                {{ "%+.0f"|format(r.score) }}
+              </span>
+            </td>
+            <td>{{ "%.0f%%"|format(r.bb_pos * 100) if r.bb_pos else '-' }}</td>
+            <td>{{ "%.0f"|format(r.rsi) if r.rsi else '-' }}</td>
+            <td class="{{ 'text-success' if r.chg_5d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_5d) }}</td>
+            <td class="{{ 'text-success' if r.chg_20d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_20d) }}</td>
+            <td>{{ "%.3f"|format(r.ma20) if r.ma20 else '-' }}</td>
+            <td>{{ "%.3f"|format(r.ma60) if r.ma60 else '-' }}</td>
+            <td>{{ r.trend }}</td>
+            <td>{{ "%.2f"|format(r.atr_pct) if r.atr_pct else '-' }}</td>
+            <td>
+              <span class="badge
+                {% if r.action == 'BUY' %}bg-success
+                {% elif r.action == 'WATCH' %}bg-warning text-dark
+                {% elif r.action == 'HOLD' %}bg-secondary
+                {% elif r.action in ('SELL', 'STOP') %}bg-danger
+                {% elif r.action == 'TAKE_PROFIT' %}bg-info
+                {% elif r.action == 'AVOID' %}bg-dark
+                {% else %}bg-light text-dark
+                {% endif %}
+              ">{{ r.action }}</span>
+            </td>
+            <td><small>{{ r.reason }}</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

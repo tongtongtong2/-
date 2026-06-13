@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}ETF Trader V2 — 精选排名{% endblock %}
+{% block content %}
+
+<h2>⭐ ETF 精选排名</h2>
+<p class="text-muted">
+  池子 {{ summary.total }}只 · 有数据 {{ summary.with_data }}只 · 平均评分 {{ "%+.1f"|format(summary.avg_score) }}
+</p>
+
+<div class="card">
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0">
+        <thead class="table-dark">
+          <tr>
+            <th>#</th>
+            <th>代码</th>
+            <th>名称</th>
+            <th>现价</th>
+            <th>评分</th>
+            <th>布林%</th>
+            <th>RSI</th>
+            <th>5日%</th>
+            <th>20日%</th>
+            <th>趋势</th>
+            <th>操作</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in top %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td><code>{{ r.code }}</code></td>
+            <td><strong>{{ r.name }}</strong></td>
+            <td>{{ "%.3f"|format(r.close) if r.close else '-' }}</td>
+            <td>
+              <span class="badge {% if r.score >= 50 %}bg-success{% elif r.score >= 30 %}bg-info{% elif r.score >= -30 %}bg-secondary{% elif r.score >= -70 %}bg-warning{% else %}bg-danger{% endif %}">
+                {{ "%+.0f"|format(r.score) }}
+              </span>
+            </td>
+            <td>{{ "%.0f%%"|format(r.bb_pos * 100) if r.bb_pos else '-' }}</td>
+            <td>{{ "%.0f"|format(r.rsi) if r.rsi else '-' }}</td>
+            <td class="{{ 'text-success' if r.chg_5d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_5d) }}</td>
+            <td class="{{ 'text-success' if r.chg_20d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_20d) }}</td>
+            <td>{{ r.trend }}</td>
+            <td>
+              <span class="badge
+                {% if r.action == 'BUY' %}bg-success
+                {% elif r.action == 'WATCH' %}bg-warning text-dark
+                {% else %}bg-secondary
+                {% endif %}
+              ">{{ r.action }}</span>
+            </td>
+            <td><small>{{ r.reason[:40] }}</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

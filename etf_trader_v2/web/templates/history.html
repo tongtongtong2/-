@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}ETF Trader V2 — 历史信号{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2>📜 历史信号趋势</h2>
+  <form class="d-flex gap-2" method="get">
+    <select name="days" class="form-select form-select-sm" style="width:auto;">
+      <option value="7" {% if days == 7 %}selected{% endif %}>近7天</option>
+      <option value="30" {% if days == 30 %}selected{% endif %}>近30天</option>
+      <option value="90" {% if days == 90 %}selected{% endif %}>近90天</option>
+      <option value="180" {% if days == 180 %}selected{% endif %}>近180天</option>
+      <option value="365" {% if days == 365 %}selected{% endif %}>近365天</option>
+    </select>
+    <button class="btn btn-sm btn-primary" type="submit">查询</button>
+  </form>
+</div>
+
+<!-- 图表 -->
+<div class="card mb-4">
+  <div class="card-body">
+    <canvas id="historyChart" height="80"></canvas>
+  </div>
+</div>
+
+<!-- 数据表 -->
+<div class="card">
+  <div class="card-header">
+    <h5 class="mb-0">历史信号数据 (近{{ days }}天)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover table-sm mb-0">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>ETF数量</th>
+            <th>买入信号</th>
+            <th>平均评分</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for h in history %}
+          <tr>
+            <td>{{ h.date }}</td>
+            <td>{{ h.total }}</td>
+            <td>
+              <span class="badge {% if h.buy_cnt > 5 %}bg-success{% elif h.buy_cnt > 0 %}bg-info{% else %}bg-secondary{% endif %}">
+                {{ h.buy_cnt }}
+              </span>
+            </td>
+            <td>
+              <span class="{% if h.avg_score > 30 %}text-success{% elif h.avg_score < -30 %}text-danger{% endif %}">
+                {{ "%+.1f"|format(h.avg_score) }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const history = {{ history | tojson | safe }};
+  const dates = history.map(h => h.date).reverse();
+  const buyCnt = history.map(h => h.buy_cnt).reverse();
+  const avgScore = history.map(h => h.avg_score).reverse();
+
+  new Chart(document.getElementById('historyChart'), {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: '买入信号数',
+          data: buyCnt,
+          borderColor: '#28a745',
+          backgroundColor: 'rgba(40,167,69,0.1)',
+          yAxisID: 'y',
+          tension: 0.3,
+        },
+        {
+          label: '平均评分',
+          data: avgScore,
+          borderColor: '#007bff',
+          backgroundColor: 'rgba(0,123,255,0.1)',
+          yAxisID: 'y1',
+          tension: 0.3,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          title: { display: true, text: '买入信号数' }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          title: { display: true, text: '平均评分' },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,9 +1,19 @@
-.venv/
+# 大数据文件
+*.db
+*.db.bak
+*.pkl
+*.sql
+
+# Python
 __pycache__/
 *.pyc
-.env
-*.db
-my_holdings.json
-friend_holdings.json
-*.bat
-etf_data.db
+.venv/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# 临时文件
+*.log
+.cache/

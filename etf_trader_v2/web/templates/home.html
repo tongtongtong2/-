@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}ETF Trader V2 — 首页{% endblock %}
+{% block content %}
+
+<div class="row mb-4">
+  <div class="col">
+    <h2>📈 ETF 布林带轮动</h2>
+    <p class="text-muted">评分为主 · 布林过滤 · 大盘感知</p>
+  </div>
+  <div class="col-auto">
+    <div class="card bg-light">
+      <div class="card-body text-center py-2">
+        <small class="text-muted">数据日期</small>
+        <div class="fw-bold">{{ latest }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 大盘状态 -->
+<div class="row mb-4">
+  <div class="col-md-3">
+    <div class="card border-{% if market.state == 'bull' %}success{% elif market.state == 'bear' %}danger{% else %}secondary{% endif %}">
+      <div class="card-body">
+        <h5 class="card-title">大盘状态</h5>
+        <h2>
+          {% if market.state == 'bull' %}🐂 牛市
+          {% elif market.state == 'bear' %}🐻 熊市
+          {% elif market.state == 'range' %}📊 震荡
+          {% else %}❓ 未知{% endif %}
+        </h2>
+        <p class="mb-1">趋势: {{ "%.1f"|format(market.trend) }}%</p>
+        <p class="mb-0">MA20: {{ "%.1f"|format(market.ma20) }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">买入信号</h5>
+        <h2 class="text-success">{{ buys|length }}</h2>
+        <p class="text-muted mb-0">只看回调企稳</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">关注</h5>
+        <h2 class="text-warning">{{ watches|length }}</h2>
+        <p class="text-muted mb-0">等待信号</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">规避/卖出</h5>
+        <h2 class="text-danger">{{ avoids|length }}</h2>
+        <p class="text-muted mb-0">不建议参与</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 买入信号 -->
+{% if buys %}
+<div class="card mb-4 border-success">
+  <div class="card-header bg-success text-white">
+    <h5 class="mb-0">🟢 买入信号 ({{ buys|length }}只)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th><th>现价</th><th>评分</th><th>布林</th><th>5日</th><th>20日</th><th>RSI</th><th>趋势</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in buys %}
+          <tr>
+            <td><code>{{ r.code }}</code></td>
+            <td>{{ r.name }}</td>
+            <td>{{ "%.3f"|format(r.close) }}</td>
+            <td><span class="badge bg-success">{{ "%+.0f"|format(r.score) }}</span></td>
+            <td>{{ "%.0f%%"|format(r.bb_pos * 100) }}</td>
+            <td class="{{ 'text-success' if r.chg_5d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_5d) }}</td>
+            <td class="{{ 'text-success' if r.chg_20d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_20d) }}</td>
+            <td>{{ "%.0f"|format(r.rsi) }}</td>
+            <td>{{ r.trend }}</td>
+          </tr>
+          <tr>
+            <td colspan="9"><small class="text-muted">→ {{ r.reason }}</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 关注列表 -->
+{% if watches %}
+<div class="card mb-4 border-warning">
+  <div class="card-header bg-warning text-dark">
+    <h5 class="mb-0">👀 关注 ({{ watches|length }}只)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th><th>现价</th><th>评分</th><th>布林</th><th>5日</th><th>RSI</th><th>信号</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in watches[:12] %}
+          <tr>
+            <td><code>{{ r.code }}</code></td>
+            <td>{{ r.name }}</td>
+            <td>{{ "%.3f"|format(r.close) }}</td>
+            <td><span class="badge bg-secondary">{{ "%+.0f"|format(r.score) }}</span></td>
+            <td>{{ "%.0f%%"|format(r.bb_pos * 100) }}</td>
+            <td class="{{ 'text-success' if r.chg_5d > 0 else 'text-danger' }}">{{ "%+.1f%%"|format(r.chg_5d) }}</td>
+            <td>{{ "%.0f"|format(r.rsi) }}</td>
+            <td><small class="text-muted">{{ r.reason[:40] }}...</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 持仓观望 -->
+{% if holds %}
+<div class="card mb-4 border-secondary">
+  <div class="card-header bg-secondary text-white">
+    <h5 class="mb-0">💤 持仓观望 ({{ holds|length }}只)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th><th>现价</th><th>评分</th><th>布林</th><th>RSI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in holds %}
+          <tr>
+            <td><code>{{ r.code }}</code></td>
+            <td>{{ r.name }}</td>
+            <td>{{ "%.3f"|format(r.close) }}</td>
+            <td><span class="badge bg-secondary">{{ "%+.0f"|format(r.score) }}</span></td>
+            <td>{{ "%.0f%%"|format(r.bb_pos * 100) }}</td>
+            <td>{{ "%.0f"|format(r.rsi) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 规避 -->
+{% if avoids %}
+<div class="card mb-4 border-danger">
+  <div class="card-header bg-danger text-white">
+    <h5 class="mb-0">🔴 规避/卖出 ({{ avoids|length }}只)</h5>
+  </div>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead>
+          <tr>
+            <th>代码</th><th>名称</th><th>现价</th><th>评分</th><th>操作</th><th>原因</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in avoids %}
+          <tr>
+            <td><code>{{ r.code }}</code></td>
+            <td>{{ r.name }}</td>
+            <td>{{ "%.3f"|format(r.close) }}</td>
+            <td><span class="badge bg-danger">{{ "%+.0f"|format(r.score) }}</span></td>
+            <td><span class="badge bg-dark">{{ r.action }}</span></td>
+            <td><small class="text-muted">{{ r.reason[:50] }}</small></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- 无数据 -->
+{% if no_data %}
+<div class="alert alert-warning">
+  ⚠ 无数据ETF: {{ no_data|map(attribute='code')|join(', ') }} — 已从池子跳过
+</div>
+{% endif %}
+
+{% if not buys and not watches and not holds %}
+<div class="alert alert-info">
+  当前无明确操作。{{ market.state }}市 —
+  {{ '等回调买入' if market.state == 'bull' else '等市场企稳' }}
+</div>
+{% endif %}
+
+{% endblock %}

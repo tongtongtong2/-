@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}ETF Trader V2 — 策略统计{% endblock %}
+{% block content %}
+
+<h2>📊 策略统计</h2>
+<p class="text-muted">数据日期: {{ stats.date }}</p>
+
+<!-- 概览卡片 -->
+<div class="row mb-4">
+  <div class="col-md-2">
+    <div class="card text-center">
+      <div class="card-body">
+        <h6>ETF总数</h6>
+        <h3>{{ stats.total_etfs }}</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center border-success">
+      <div class="card-body">
+        <h6>买入信号</h6>
+        <h3 class="text-success">{{ stats.buy_count }}</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center border-warning">
+      <div class="card-body">
+        <h6>关注</h6>
+        <h3 class="text-warning">{{ stats.watch_count }}</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center">
+      <div class="card-body">
+        <h6>强看多(≥50)</h6>
+        <h3>{{ stats.strong_count }}</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center border-danger">
+      <div class="card-body">
+        <h6>看空(&lt;-30)</h6>
+        <h3 class="text-danger">{{ stats.weak_count }}</h3>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-2">
+    <div class="card text-center">
+      <div class="card-body">
+        <h6>平均评分</h6>
+        <h3 class="{{ 'text-success' if stats.avg_score > 0 else 'text-danger' }}">
+          {{ "%+.1f"|format(stats.avg_score) }}
+        </h3>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 大盘状态 -->
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><h5 class="mb-0">大盘状态</h5></div>
+      <div class="card-body">
+        <table class="table table-sm mb-0">
+          <tr><td>状态</td><td>
+            <span class="badge {% if stats.market.state == 'bull' %}bg-success{% elif stats.market.state == 'bear' %}bg-danger{% else %}bg-secondary{% endif %}">
+              {{ stats.market.state }}
+            </span>
+          </td></tr>
+          <tr><td>收盘</td><td>{{ "%.1f"|format(stats.market.close) }}</td></tr>
+          <tr><td>MA20</td><td>{{ "%.1f"|format(stats.market.ma20) }}</td></tr>
+          <tr><td>趋势</td><td>{{ "%+.1f"|format(stats.market.trend) }}%</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><h5 class="mb-0">评分分布</h5></div>
+      <div class="card-body">
+        <div class="progress mb-2" style="height:24px;">
+          {% set strong_pct = (stats.strong_count / stats.total_etfs * 100) if stats.total_etfs else 0 %}
+          <div class="progress-bar bg-success" style="width:{{ strong_pct }}%">强看多 {{ stats.strong_count }}</div>
+        </div>
+        {% set buy_pct = ((stats.buy_count - stats.strong_count) / stats.total_etfs * 100) if stats.total_etfs else 0 %}
+        {% if buy_pct > 0 %}
+        <div class="progress mb-2" style="height:24px;">
+          <div class="progress-bar bg-info" style="width:{{ buy_pct }}%">看多 {{ stats.buy_count - stats.strong_count }}</div>
+        </div>
+        {% endif %}
+        <div class="progress mb-2" style="height:24px;">
+          {% set neutral_pct = ((stats.total_etfs - stats.buy_count - stats.weak_count) / stats.total_etfs * 100) if stats.total_etfs else 0 %}
+          <div class="progress-bar bg-secondary" style="width:{{ neutral_pct }}%">中性 {{ stats.total_etfs - stats.buy_count - stats.weak_count }}</div>
+        </div>
+        {% if stats.weak_count > 0 %}
+        <div class="progress mb-2" style="height:24px;">
+          {% set weak_pct = (stats.weak_count / stats.total_etfs * 100) if stats.total_etfs else 0 %}
+          <div class="progress-bar bg-danger" style="width:{{ weak_pct }}%">看空 {{ stats.weak_count }}</div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 历史趋势图 -->
+{% if stats.history %}
+<div class="card">
+  <div class="card-header"><h5 class="mb-0">近30天信号趋势</h5></div>
+  <div class="card-body">
+    <canvas id="statsTrendChart" height="60"></canvas>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+{% if stats.history %}
+<script>
+(function() {
+  const history = {{ stats.history | tojson | safe }};
+  const dates = history.map(h => h.date).reverse();
+  const buyCnt = history.map(h => h.buy_cnt).reverse();
+  const avgScore = history.map(h => h.avg_score).reverse();
+
+  new Chart(document.getElementById('statsTrendChart'), {
+    type: 'bar',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: '买入信号数',
+          data: buyCnt,
+          backgroundColor: 'rgba(40,167,69,0.6)',
+          yAxisID: 'y',
+        },
+        {
+          label: '平均评分',
+          data: avgScore,
+          type: 'line',
+          borderColor: '#ffc107',
+          backgroundColor: 'rgba(255,193,7,0.1)',
+          yAxisID: 'y1',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        y: {
+          type: 'linear',
+          display: true,
+          position: 'left',
+          title: { display: true, text: '买入信号数' }
+        },
+        y1: {
+          type: 'linear',
+          display: true,
+          position: 'right',
+          title: { display: true, text: '平均评分' },
+          grid: { drawOnChartArea: false }
+        }
+      }
+    }
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
