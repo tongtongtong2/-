@@ -257,5 +257,158 @@ def scan_all():
     return buy_candidates, near_candidates
 
 
+def fetch_sina_realtime(codes):
+    """批量拉取新浪实时行情, 返回 {code: {price, open, high, low, volume, name}}"""
+    batch_size = 50
+    result = {}
+    for i in range(0, len(codes), batch_size):
+        batch = codes[i:i+batch_size]
+        symbols = ','.join(f"{'sz' if c.startswith('1') else 'sh'}{c}" for c in batch)
+        url = f"https://hq.sinajs.cn/list={symbols}"
+        try:
+            req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn"})
+            resp = urllib.request.urlopen(req, timeout=10)
+            text = resp.read().decode("gbk")
+            for line in text.strip().split('\n'):
+                if '=' not in line or '=""' in line:
+                    continue
+                code_part = line.split('=')[0].split('_')[-1] if '_' in line.split('=')[0] else line.split('=')[0]
+                code = code_part[2:]  # 去掉sh/sz前缀
+                data = line.split('"')[1].split(',')
+                if len(data) < 6:
+                    continue
+                result[code] = {
+                    'name': data[0],
+                    'open': float(data[1]) if data[1] else 0,
+                    'prev_close': float(data[2]) if data[2] else 0,
+                    'price': float(data[3]) if data[3] else 0,
+                    'high': float(data[4]) if data[4] else 0,
+                    'low': float(data[5]) if data[5] else 0,
+                }
+        except Exception as e:
+            pass
+    return result
+
+
+def scan_realtime():
+    """2:50实时扫描 — 用当前价代理收盘价计算MACD"""
+    from datetime import datetime
+    print(f"=== 实时评分扫描 === {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    
+    # 1. ETF列表
+    conn = pymysql.connect(**MYSQL_CFG, charset='utf8mb4')
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT code FROM quote ORDER BY code")
+    all_codes = [r[0] for r in cursor.fetchall()]
+    cursor.close()
+    conn.close()
+    
+    # 2. 拉实时行情
+    print(f"拉取{len(all_codes)}只实时行情...")
+    rt = fetch_sina_realtime(all_codes)
+    print(f"获取: {len(rt)}只")
+    
+    # 3. 逐只扫描
+    buy_candidates = []
+    
+    for code in all_codes:
+        if code not in rt or rt[code]['price'] <= 0:
+            continue
+        
+        # MySQL历史
+        conn = pymysql.connect(**MYSQL_CFG, charset='utf8mb4')
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT date, open, high, low, close, volume FROM quote WHERE code=%s ORDER BY date",
+            (code,))
+        rows = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        if len(rows) < TRADING_DAYS_HISTORY:
+            continue
+        
+        dates = [str(r[0]) for r in rows]
+        opens = [float(r[1] or 0) for r in rows]
+        highs = [float(r[2] or 0) for r in rows]
+        lows = [float(r[3] or 0) for r in rows]
+        closes = [float(r[4] or 0) for r in rows]
+        volumes = [float(r[5] or 0) for r in rows]
+        
+        # 追加今天实时数据 (用当前价作收盘价)
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        r = rt[code]
+        dates.append(today_str)
+        opens.append(r['open'])
+        highs.append(r['high'])
+        lows.append(r['low'])
+        closes.append(r['price'])  # ← 当前价当收盘
+        volumes.append(0)  # 实时量能暂不参与评分
+        
+        n = len(closes)
+        
+        e12 = ema(closes, 12); e26 = ema(closes, 26)
+        dif = [e12[j]-e26[j] for j in range(n)]
+        dea = ema(dif, 9)
+        bar = [2*(dif[j]-dea[j]) for j in range(n)]
+        ma50 = sma(closes, 50); ma200 = sma(closes, 200)
+        
+        # 用昨日量能 (实时量不准)
+        ma20_vol = sma(volumes, 20)
+        
+        tr_list = []
+        for j in range(n):
+            tr = highs[j]-lows[j] if j==0 else max(
+                highs[j]-lows[j], abs(highs[j]-closes[j-1]), abs(lows[j]-closes[j-1]))
+            tr_list.append(tr)
+        atr_vals = sma(tr_list, 14)
+        atr_pct = [atr_vals[j]/closes[j]*100 if closes[j]>0 else 99 for j in range(n)]
+        
+        i = n - 1
+        
+        is_golden_now = dif[i] > dea[i] and bar[i] > 0
+        was_golden = dif[i-1] > dea[i-1] and bar[i-1] > 0
+        new_golden = is_golden_now and not was_golden
+        
+        if not new_golden:
+            continue
+        
+        score = compute_score(i, closes, opens, highs, lows, volumes,
+                            dif, dea, bar, ma50, ma200, ma20_vol, atr_pct)
+        
+        if score >= SCORE_THRESHOLD:
+            buy_candidates.append({
+                'code': code, 'name': rt[code]['name'],
+                'price': r['price'], 'score': score,
+                'chg': (r['price']/r['prev_close']-1)*100,
+                'dif': dif[i], 'dea': dea[i],
+                'gap_limit': r['price'] * (1 + GAP_LIMIT/100),
+            })
+    
+    buy_candidates.sort(key=lambda x: -x['score'])
+    
+    print(f"\n{'='*70}")
+    print(f"🔴 实时买入信号 — 2:50扫描 (评分≥{SCORE_THRESHOLD})")
+    print(f"{'='*70}")
+    
+    if buy_candidates:
+        print(f"\n{'代码':<8} {'名称':<12} {'现价':>8} {'评分':>5} {'涨幅':>7} "
+              f"{'DIF':>8} {'DEA':>8} {'跳空限':>8}")
+        print("-" * 78)
+        for c in buy_candidates:
+            print(f"{c['code']:<8} {c['name']:<12} {c['price']:>8.4f} {c['score']:>4.1f} "
+                  f"{c['chg']:>+6.2f}% {c['dif']:>+8.4f} {c['dea']:>+8.4f} {c['gap_limit']:>8.4f}")
+        print(f"\n  ⚠️ 实时扫描用当前价替代收盘价, 收盘确认前仅供参考")
+        print(f"  如果收盘前价格大幅波动, MACD可能翻盘")
+        print(f"  ✅ 共{len(buy_candidates)}只 — 收盘后跑 scan_all() 确认")
+    else:
+        print("\n  ❌ 无信号 — 2:50空仓")
+    
+    return buy_candidates
+
+
 if __name__ == '__main__':
-    scan_all()
+    if len(sys.argv) > 1 and sys.argv[1] == '--realtime':
+        scan_realtime()
+    else:
+        scan_all()
