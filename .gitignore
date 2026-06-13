@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large binaries
+*.exe
+*.zip
+
+# Keep the old project files out of this branch
+auto_shutdown.exe
+auto_shutdown.py
+rocketmq-flink-main/
+rocketmq-flink-main.zip
+save_template.py
+script.py
+template.png
